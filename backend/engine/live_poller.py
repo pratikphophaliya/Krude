@@ -87,8 +87,9 @@ class LivePollerManager:
         """Unsubscribes an SSE client."""
         self.subscribers.discard(q)
 
-    def start_live_poller(self):
-        """Starts the 10-minute background live GDELT poller."""
+    def start_live_poller(self, risk_agent=None):
+        """Starts the background broadcast loop, reusing the API's risk agent so news quota isn't spent twice."""
+        self.risk_agent = risk_agent
         if not self.poller_active:
             self.poller_active = True
             try:
@@ -105,8 +106,10 @@ class LivePollerManager:
 
     async def _run_poller_loop(self):
         """Executes periodic GDELT polling and broadcasts live stream updates."""
-        from .risk_intel import RiskIntelligenceAgent
-        risk_agent = RiskIntelligenceAgent(self.data_dir, self.data_dir.parent / "models")
+        risk_agent = self.risk_agent
+        if risk_agent is None:
+            from .risk_intel import RiskIntelligenceAgent
+            risk_agent = RiskIntelligenceAgent(self.data_dir, self.data_dir.parent / "models")
 
         while self.poller_active:
             try:
@@ -125,6 +128,7 @@ class LivePollerManager:
                     "brent_spot_usd": 82.50,
                     "corridors": corridors_status,
                     "headlines": headlines,
+                    "feed_status": risk_agent.get_feed_status(),
                     "status": "LIVE_STREAM_ACTIVE"
                 }
                 await self.broadcast_event("live_update", payload)

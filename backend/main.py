@@ -63,8 +63,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Starts background GDELT live poller loop on server startup."""
-    live_manager.start_live_poller()
+    """Starts the live SSE broadcast loop on server startup."""
+    live_manager.start_live_poller(risk_agent)
 
 # Initialize engines
 risk_agent = RiskIntelligenceAgent(DATA_DIR, MODELS_DIR)
@@ -270,6 +270,11 @@ def refresh_risk_intelligence():
 def get_live_headlines():
     """Returns all current live and recent breaking maritime headlines evaluated by KrudeAi."""
     return risk_agent.get_live_ticker_headlines()
+
+@app.get("/api/risk/feed-status")
+def get_feed_status():
+    """Per-provider health (NewsAPI, GNews, GDELT) and time of the last successful news refresh."""
+    return risk_agent.get_feed_status()
 
 @app.get("/api/risk/timeline")
 def get_corridor_timeline(corridor: str = Query("Hormuz", description="Corridor name: Hormuz, Bab-el-Mandeb, etc.")):

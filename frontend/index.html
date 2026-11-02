@@ -644,8 +644,9 @@
     <section id="headline-ticker" class="ticker-section">
       <div class="ticker-header-bar">
         <span class="ticker-label"><i class="fa-solid fa-bolt text-gold"></i> Live KrudeAi Stream</span>
-        <span class="ticker-sub">Real-Time Maritime Headlines Scored by KrudeAi · Click any
+        <span class="ticker-sub">Live headlines from NewsAPI, GNews &amp; GDELT, refreshed every 15 min · Click any
           headline to inspect model geopolitical reasoning</span>
+        <span class="ticker-feed-status" id="ticker-feed-status">Loading feeds…</span>
       </div>
 
       <!-- Top Row: Marquee Left -->
@@ -684,8 +685,10 @@
               <div class="kpi-pill-wrap"><span id="modal-severity-level" class="modal-threat-pill threat-red">CRITICAL</span></div>
             </div>
             <div class="modal-kpi-card" id="modal-kpi-source">
-              <span class="kpi-card-label"><i class="fa-solid fa-newspaper"></i> Verified Feed</span>
-              <div class="kpi-source-val" id="modal-source-name">Al Jazeera English</div>
+              <span class="kpi-card-label"><i class="fa-solid fa-newspaper"></i> Source</span>
+              <div class="kpi-source-val" id="modal-source-name"></div>
+              <div class="kpi-source-meta" id="modal-source-meta"></div>
+              <a class="kpi-source-link" id="modal-source-link" href="#" target="_blank" rel="noopener noreferrer">Open article <i class="fa-solid fa-arrow-up-right-from-square"></i></a>
             </div>
           </div>
 

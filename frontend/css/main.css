@@ -2017,6 +2017,7 @@ body {
     margin: 0 auto 28px auto;
     padding: 0 60px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 18px;
 }
@@ -2033,6 +2034,13 @@ body {
 
 .ticker-sub {
     font-size: 0.92rem;
+    color: var(--text-muted);
+}
+
+.ticker-feed-status {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
     color: var(--text-muted);
 }
 
@@ -2125,6 +2133,12 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.35;
+}
+
+.pill-source {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    white-space: nowrap;
 }
 
 .pill-score {
@@ -2342,6 +2356,25 @@ body {
     max-width: 100%;
     word-break: break-word;
     text-align: center;
+}
+
+.kpi-source-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 4px;
+}
+
+.kpi-source-link {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 0.78rem;
+    color: var(--accent-amber);
+    text-decoration: none;
+}
+
+.kpi-source-link:hover {
+    text-decoration: underline;
 }
 
 .modal-reason-box {

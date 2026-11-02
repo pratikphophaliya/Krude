@@ -687,11 +687,20 @@ async function initHeadlineTicker() {
     const scoreVal = typeof item.pred === "number" ? item.pred : (typeof item.risk_score === "number" ? item.risk_score : 5.0);
     const scoreColor = scoreVal >= 7.0 ? "threat-red" : (scoreVal >= 4.0 ? "threat-amber" : "threat-green");
 
-    pill.innerHTML = `
-      <span class="pill-tag">${item.corridor}</span>
-      <span class="pill-text">${item.headline || item.title || ""}</span>
-      <span class="pill-score ${scoreColor}">${scoreVal.toFixed(1)}</span>
-    `;
+    // Headlines come from third-party news APIs, so build with textContent (never innerHTML)
+    const parts = [
+      ["pill-tag", item.corridor || ""],
+      ["pill-text", item.headline || item.title || ""],
+      ["pill-source", item.source || item.provider || ""],
+      [`pill-score ${scoreColor}`, scoreVal.toFixed(1)]
+    ];
+    parts.forEach(([cls, text]) => {
+      if (!text) return;
+      const span = document.createElement("span");
+      span.className = cls;
+      span.textContent = text;
+      pill.appendChild(span);
+    });
 
     pill.addEventListener("click", () => openHeadlineModal(item));
     return pill;
@@ -710,7 +719,31 @@ async function initHeadlineTicker() {
     });
   }
 
+  function renderFeedStatus(status) {
+    const el = document.getElementById("ticker-feed-status");
+    if (!el || !status) return;
+    const providers = Object.entries(status.providers || {})
+      .filter(([, p]) => p.configured)
+      .map(([name, p]) => p.ok ? `${name} ${p.count}` : `${name} unavailable (${p.error})`);
+    let updated = "no live headlines yet";
+    if (status.last_updated) {
+      const mins = Math.round((Date.now() - new Date(status.last_updated).getTime()) / 60000);
+      updated = mins < 1 ? "updated just now" : `updated ${mins} min ago`;
+    }
+    el.textContent = [updated, ...providers].join(" · ");
+  }
+
+  async function fetchFeedStatus() {
+    try {
+      const res = await fetch("/api/risk/feed-status");
+      if (res.ok) renderFeedStatus(await res.json());
+    } catch (e) {
+      // Status line is informational only
+    }
+  }
+
   async function fetchLatestStreamArticles() {
+    fetchFeedStatus();
     let liveArticles = [];
     try {
       const res = await fetch("/api/risk/headlines");
@@ -735,7 +768,10 @@ async function initHeadlineTicker() {
                     headline: h.headline || h.title,
                     corridor: c.corridor,
                     pred: typeof h.risk_score === "number" ? h.risk_score : (c.risk_score || 5.0),
-                    source: h.source || h.headline_source || "Live GDELT Wire",
+                    source: h.source || "",
+                    provider: h.provider || "",
+                    url: h.url || "",
+                    published_at: h.published_at || "",
                     reason: h.reason || c.reason || "Model-calibrated maritime supply chain threat evaluation."
                   });
                 });
@@ -767,6 +803,7 @@ async function initHeadlineTicker() {
           cachedTickerArticles = payload.headlines;
           renderMarqueeItems(cachedTickerArticles);
         }
+        if (payload.feed_status) renderFeedStatus(payload.feed_status);
         if (payload.corridors) {
           const hormuz = payload.corridors.find(c => c.corridor === "Hormuz");
           if (hormuz) syncHeroCardFromRisk({ corridors: payload.corridors });
@@ -828,7 +865,10 @@ function openHeadlineModal(item) {
   const headlineText = item.headline || item.title || "Maritime Security Intelligence Update";
 
   const corridorTag = document.getElementById("modal-corridor-tag");
-  if (corridorTag) corridorTag.innerHTML = `<i class="fa-solid fa-location-dot"></i> ${corridorName}`;
+  if (corridorTag) {
+    corridorTag.innerHTML = `<i class="fa-solid fa-location-dot"></i> `;
+    corridorTag.appendChild(document.createTextNode(corridorName));
+  }
 
   const headlineTitle = document.getElementById("modal-headline-title");
   if (headlineTitle) headlineTitle.textContent = headlineText;
@@ -855,7 +895,21 @@ function openHeadlineModal(item) {
 
   const sourceEl = document.getElementById("modal-source-name");
   if (sourceEl) {
-    sourceEl.textContent = item.source || item.headline_source || "News Wire";
+    sourceEl.textContent = item.source || item.headline_source || "Unknown source";
+  }
+
+  const metaEl = document.getElementById("modal-source-meta");
+  if (metaEl) {
+    const published = item.published_at ? new Date(item.published_at) : null;
+    const when = published && !isNaN(published) ? published.toLocaleString() : "";
+    metaEl.textContent = [item.provider ? `via ${item.provider}` : "", when].filter(Boolean).join(" · ");
+  }
+
+  const linkEl = document.getElementById("modal-source-link");
+  if (linkEl) {
+    const safeUrl = /^https?:\/\//i.test(item.url || "") ? item.url : "";
+    linkEl.href = safeUrl || "#";
+    linkEl.style.display = safeUrl ? "" : "none";
   }
 
   const reasonEl = document.getElementById("modal-reason-text");

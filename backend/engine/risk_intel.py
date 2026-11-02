@@ -2,7 +2,7 @@
 Krude - Component 1: Risk Intelligence Agent (REAL)
 ===================================================
 Input: Real live news headlines about the five maritime energy corridors
-       pulled from GDELT's free DOC 2.0 API (no API key required).
+       pulled from NewsAPI, GNews (keys in .env) and GDELT DOC 2.0 (no key required).
 Model: Llama 3.2 3B Instruct fine-tuned with QLoRA (via Unsloth) on ~300 labeled
        (headline -> output) examples, served via local/HuggingFace adapter or deterministic
        inference pipeline matching the exact model signature:
@@ -15,17 +15,17 @@ Fixed list of corridors (exactly these five):
 - Cape of Good Hope
 - Suez
 
-"Live" = a refresh action (button or 5-minute timer) that re-queries GDELT and re-runs inference.
+"Live" = a background refresh every NEWS_REFRESH_SECONDS (default 15 min) that re-queries
+all providers and re-runs inference. Training headlines are never shown as live news.
 """
 
 import os
 import json
 import time
 import re
-import urllib.parse
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import requests
@@ -102,54 +102,34 @@ CORRIDOR_CONFIG = {
     }
 }
 
-SEED_HEADLINES = [
-    {
-        "corridor": "Hormuz",
-        "title": "Iranian naval patrols step up inspections of commercial tankers navigating the Strait of Hormuz",
-        "supplier": "Saudi Arabia",
-        "source": "Reuters",
-        "risk_score": 6.8,
-        "reason": "Heightened naval inspection frequency increases maritime interdiction risk for Persian Gulf crude."
-    },
-    {
-        "corridor": "Bab-el-Mandeb",
-        "title": "Maritime security agency reports missile splash near commercial vessel in southern Red Sea",
-        "supplier": "Russia",
-        "source": "UKMTO",
-        "risk_score": 8.2,
-        "reason": "Ongoing kinetic strikes force major tanker operators to divert voyages around the Cape."
-    },
-    {
-        "corridor": "Malacca",
-        "title": "Singapore and Malaysian navies conduct joint maritime security patrol across Malacca Strait",
-        "supplier": "Russia",
-        "source": "Straits Times",
-        "risk_score": 2.1,
-        "reason": "Coordinated naval patrols maintain stable sea lanes with nominal security risks."
-    },
-    {
-        "corridor": "Cape of Good Hope",
-        "title": "South Atlantic bunker fuel demand spikes as redirected tankers refuel off South African coast",
-        "supplier": "USA",
-        "source": "Bloomberg Energy",
-        "risk_score": 2.4,
-        "reason": "Safe open ocean route experiencing higher congestion and bunkering wait times."
-    },
-    {
-        "corridor": "Suez",
-        "title": "Suez Canal Authority reports steady northbound tanker convoys despite Red Sea rerouting trends",
-        "supplier": "Russia",
-        "source": "Lloyd's List",
-        "risk_score": 4.2,
-        "reason": "Northbound traffic remains operational though downstream Red Sea risks affect overall transit."
-    }
-]
+# Refresh every 15 min: one request per provider per cycle = 96/day, inside the
+# 100 req/day free tiers of NewsAPI and GNews.
+NEWS_REFRESH_SECONDS = int(os.getenv("NEWS_REFRESH_SECONDS", "900"))
+MAX_ARTICLES = 40
+CACHE_SCHEMA = 2  # bump to discard caches written by older code (which mixed in training headlines)
+
+# One combined query per provider; the corridor is assigned afterwards from the article text.
+NEWSAPI_QUERY = ('("Strait of Hormuz" OR "Persian Gulf" OR "Red Sea" OR Houthi OR "Bab-el-Mandeb" '
+                 'OR "Suez Canal" OR "Strait of Malacca" OR "Cape of Good Hope") '
+                 'AND (tanker OR crude OR oil OR shipping OR maritime)')
+GNEWS_QUERY = '(Hormuz OR "Red Sea" OR Houthi OR Suez OR Malacca OR "Cape of Good Hope") AND (tanker OR oil OR shipping)'
+GDELT_QUERY = ('("Strait of Hormuz" OR "Persian Gulf" OR "Red Sea" OR Houthi OR "Suez Canal" '
+               'OR "Strait of Malacca" OR "Cape of Good Hope") (tanker OR crude OR oil OR shipping) sourcelang:english')
+GDELT_URL = os.getenv("GDELT_DOC_API_URL", "https://api.gdeltproject.org/api/v2/doc/doc")
+
+
+def _describe_error(e: Exception) -> str:
+    """Short error label that never echoes the request URL (it contains the API key)."""
+    if isinstance(e, requests.HTTPError) and e.response is not None:
+        return f"HTTP {e.response.status_code}"
+    return type(e).__name__
+
 
 class RiskIntelligenceAgent:
     """
     Component 1: Risk Intelligence Agent (REAL)
-    Fetches real GDELT DOC 2.0 news headlines for the 5 corridors and runs fine-tuned
-    Llama 3.2 3B Instruct inference (or deterministic NLP inference adapter).
+    Fetches live headlines from NewsAPI, GNews and GDELT for the 5 corridors and scores
+    each one with the KrudeAi model. Every headline keeps its real outlet, provider and URL.
     """
     def __init__(self, data_dir: Path, models_dir: Optional[Path] = None):
         self.data_dir = data_dir
@@ -158,74 +138,19 @@ class RiskIntelligenceAgent:
         self.last_fetch_time = 0.0
         self.is_refreshing = False
         self.refresh_lock = threading.Lock()
-        self.training_bank: List[Dict[str, Any]] = self._load_training_bank()
         self.cache_data: Dict[str, Any] = self._load_cache()
-        # Trigger background warm-up if cache is cold
-        if not self.cache_data.get("articles") or len(self.cache_data.get("articles", [])) < 5:
+        if time.time() - self.last_fetch_time > NEWS_REFRESH_SECONDS:
             self._trigger_background_refresh()
 
-    def _load_training_bank(self) -> List[Dict[str, Any]]:
-        """Loads all labeled training headlines from headlines.csv into intelligence memory."""
-        headlines_file = self.data_dir / "headlines.csv"
-        if headlines_file.exists():
-            try:
-                import csv
-                with open(headlines_file, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    items = []
-                    for row in reader:
-                        try:
-                            score = float(row.get("risk_score", 5.0))
-                            if score > 10.0:
-                                score = score / 10.0
-                        except ValueError:
-                            score = 5.0
-                        items.append({
-                            "id": row.get("id", ""),
-                            "headline": row.get("headline", ""),
-                            "source": row.get("source", ""),
-                            "corridor": row.get("corridor", "Other"),
-                            "risk_score": score,
-                            "summary": row.get("summary", ""),
-                            "severity": row.get("severity", "MEDIUM"),
-                            "url": row.get("url", "")
-                        })
-                    return items
-            except Exception:
-                pass
-        return []
-
     def _load_cache(self) -> Dict[str, Any]:
-        if self.cache_file.exists():
-            try:
-                with open(self.cache_file, "r", encoding="utf-8") as f:
-                    cached = json.load(f)
-                    if cached.get("articles") and len(cached.get("articles", [])) >= 5:
-                        self.last_fetch_time = cached.get("last_updated", time.time())
-                        return cached
-            except Exception:
-                pass
-        # Fallback to top training articles
-        top_articles = []
-        source_map = {
-            "Hormuz": "Reuters Energy Wire",
-            "Bab-el-Mandeb": "UKMTO Maritime Intelligence",
-            "Suez": "Bloomberg Shipping Intelligence",
-            "Malacca": "Lloyd's List Maritime",
-            "Cape of Good Hope": "Platts Global Bunker Wire"
-        }
-        for c in CORRIDORS:
-            matches = [h for h in self.training_bank if h.get("corridor") == c]
-            if matches:
-                top_articles.append({
-                    "corridor": c,
-                    "title": matches[0]["headline"],
-                    "supplier": CORRIDOR_CONFIG[c]["primary_suppliers"][0],
-                    "source": source_map.get(c, "Maritime Intelligence Wire"),
-                    "risk_score": matches[0]["risk_score"],
-                    "reason": matches[0]["summary"]
-                })
-        return {"last_updated": 0, "articles": top_articles if top_articles else SEED_HEADLINES}
+        try:
+            cached = json.loads(self.cache_file.read_text(encoding="utf-8"))
+            if cached.get("schema") == CACHE_SCHEMA:
+                self.last_fetch_time = cached.get("last_attempt", 0.0)
+                return cached
+        except (OSError, ValueError):
+            pass
+        return {"schema": CACHE_SCHEMA, "last_updated": 0.0, "last_attempt": 0.0, "providers": {}, "articles": []}
 
     def _save_cache(self, data: Dict[str, Any]):
         try:
@@ -235,7 +160,7 @@ class RiskIntelligenceAgent:
             pass
 
     def _trigger_background_refresh(self):
-        """Spawns an asynchronous background thread to refresh NewsAPI & GDELT without blocking user requests."""
+        """Spawns a background thread to refresh all news providers without blocking user requests."""
         with self.refresh_lock:
             if self.is_refreshing:
                 return
@@ -251,218 +176,149 @@ class RiskIntelligenceAgent:
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
 
-    def fetch_newsapi_headlines(self) -> List[Dict[str, Any]]:
-        """
-        Queries NewsAPI (newsapi.org) concurrently in parallel across all 5 corridors with 2.5s timeout.
-        """
-        api_key = os.getenv("NEWS_API_KEY", "fe791749f0f2404dbb8ea7eb434e1f6d")
+    # --- Providers: each returns raw articles, or None when its API key is not configured ---
+
+    def _fetch_newsapi(self) -> Optional[List[Dict[str, Any]]]:
+        api_key = os.getenv("NEWS_API_KEY")
         if not api_key:
-            return []
+            return None
+        resp = requests.get("https://newsapi.org/v2/everything", params={
+            "q": NEWSAPI_QUERY, "language": "en", "sortBy": "publishedAt", "pageSize": 30, "apiKey": api_key
+        }, timeout=10)
+        resp.raise_for_status()
+        return [{
+            "title": a.get("title"),
+            "description": a.get("description"),
+            "source": (a.get("source") or {}).get("name"),
+            "url": a.get("url"),
+            "published_at": a.get("publishedAt"),
+        } for a in resp.json().get("articles", [])]
 
-        corridor_queries = {
-            "Hormuz": '("Strait of Hormuz" OR "Hormuz" OR "Persian Gulf" OR "Gulf of Oman") AND (oil OR tanker OR crude OR Iran OR Navy)',
-            "Bab-el-Mandeb": '("Bab-el-Mandeb" OR "Red Sea" OR Houthi OR Yemen) AND (tanker OR missile OR drone OR ship OR maritime)',
-            "Suez": '("Suez Canal" OR "Suez") AND (tanker OR ship OR transit OR maritime OR crude)',
-            "Malacca": '("Malacca Strait" OR "Malacca" OR "Singapore Strait") AND (tanker OR maritime OR shipping OR oil)',
-            "Cape of Good Hope": '("Cape of Good Hope" OR "South Africa") AND (tanker OR reroute OR shipping OR crude OR bunkering)'
-        }
+    def _fetch_gnews(self) -> Optional[List[Dict[str, Any]]]:
+        api_key = os.getenv("GNEWS_API_KEY")
+        if not api_key:
+            return None
+        resp = requests.get("https://gnews.io/api/v4/search", params={
+            "q": GNEWS_QUERY, "lang": "en", "max": 10, "sortby": "publishedAt", "apikey": api_key
+        }, timeout=10)
+        resp.raise_for_status()
+        return [{
+            "title": a.get("title"),
+            "description": a.get("description"),
+            "source": (a.get("source") or {}).get("name"),
+            "url": a.get("url"),
+            "published_at": a.get("publishedAt"),
+        } for a in resp.json().get("articles", [])]
 
+    def _fetch_gdelt(self) -> List[Dict[str, Any]]:
+        resp = requests.get(GDELT_URL, params={
+            "query": GDELT_QUERY, "mode": "artlist", "maxrecords": 30, "format": "json", "sort": "DateDesc"
+        }, headers={"User-Agent": "KrudeEnergySecurityAgent/2.0"}, timeout=15)
+        resp.raise_for_status()
         articles = []
-        url = "https://newsapi.org/v2/everything"
-
-        def _fetch_single_corridor(corridor, q):
-            found = []
-            try:
-                params = {
-                    "q": q,
-                    "language": "en",
-                    "sortBy": "publishedAt",
-                    "pageSize": 5,
-                    "apiKey": api_key
-                }
-                resp = requests.get(url, params=params, timeout=2.5)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    for item in data.get("articles", []):
-                        title = item.get("title", "").strip()
-                        if len(title) >= 15:
-                            src_name = item.get("source", {}).get("name", "News Wire")
-                            ev = self._run_model_inference(title, corridor, src_name)
-                            ev["published_at"] = item.get("publishedAt", "")
-                            ev["url"] = item.get("url", "")
-                            found.append(ev)
-            except Exception:
-                pass
-            return found
-
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(_fetch_single_corridor, c, q) for c, q in corridor_queries.items()]
-            for f in as_completed(futures):
-                try:
-                    res = f.result()
-                    for item in res:
-                        if not any(a["title"].lower() == item["title"].lower() for a in articles):
-                            articles.append(item)
-                except Exception:
-                    pass
-
+        for a in resp.json().get("articles", []):
+            seen = a.get("seendate", "")  # e.g. 20241014T120000Z
+            published = f"{seen[0:4]}-{seen[4:6]}-{seen[6:8]}T{seen[9:11]}:{seen[11:13]}:{seen[13:15]}Z" if len(seen) == 16 else None
+            articles.append({
+                "title": a.get("title"),
+                "description": None,
+                "source": a.get("domain"),
+                "url": a.get("url"),
+                "published_at": published,
+            })
         return articles
 
-    def fetch_gdelt_headlines(self) -> List[Dict[str, Any]]:
-        """
-        Queries GDELT DOC 2.0 API concurrently across corridors with 2.0s timeout.
-        """
-        all_articles = []
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) KrudeEnergySecurityAgent/2.0"
-        }
-        queries = {
-            "Hormuz": '("Strait of Hormuz" OR "Hormuz" OR "Persian Gulf") (tanker OR oil OR crude OR navy OR IRGC)',
-            "Bab-el-Mandeb": '("Bab-el-Mandeb" OR "Red Sea" OR "Houthi") (tanker OR missile OR drone OR maritime OR vessel)',
-            "Suez": '("Suez Canal" OR "Suez") (tanker OR crude OR transit OR reroute)',
-            "Malacca": '("Malacca" OR "Singapore Strait") (tanker OR crude OR maritime OR patrol)',
-            "Cape of Good Hope": '("Cape of Good Hope" OR "South Africa") (tanker OR reroute OR crude OR bunker)'
-        }
-
-        def _fetch_single_gdelt(corridor, q):
-            found = []
-            try:
-                encoded = urllib.parse.quote(q)
-                url = f"https://api.gdeltproject.org/api/v2/doc/doc?query={encoded}&mode=artlist&maxrecords=6&format=json&sort=DateDesc"
-                resp = requests.get(url, headers=headers, timeout=2.0)
-                if resp.status_code == 200:
-                    raw_json = resp.json()
-                    for item in raw_json.get("articles", []):
-                        t = item.get("title", "").strip()
-                        if len(t) >= 15:
-                            c = self._match_corridor(t) or corridor
-                            domain = item.get("domain", item.get("sourcecountry", "GDELT Live Wire"))
-                            ev = self._run_model_inference(t, c, domain)
-                            found.append(ev)
-            except Exception:
-                pass
-            return found
-
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(_fetch_single_gdelt, c, q) for c, q in queries.items()]
-            for f in as_completed(futures):
-                try:
-                    res = f.result()
-                    for item in res:
-                        if not any(a["title"].lower() == item["title"].lower() for a in all_articles):
-                            all_articles.append(item)
-                except Exception:
-                    pass
-
-        return all_articles
-
     def _perform_live_network_refresh(self):
-        """Executes full live network fetch across NewsAPI and GDELT in parallel and updates cache."""
+        """Queries every configured provider in parallel, scores new headlines and updates the cache."""
         now = time.time()
-        all_articles = []
+        fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        providers = {"NewsAPI": self._fetch_newsapi, "GNews": self._fetch_gnews, "GDELT": self._fetch_gdelt}
 
-        # 1. NewsAPI Live (Parallel)
-        newsapi_articles = self.fetch_newsapi_headlines()
-        if newsapi_articles:
-            all_articles.extend(newsapi_articles)
-
-        # 2. GDELT Live (Parallel)
-        if len(all_articles) < 20:
-            gdelt_articles = self.fetch_gdelt_headlines()
-            for ga in gdelt_articles:
-                if not any(a["title"].lower() == ga["title"].lower() for a in all_articles):
-                    all_articles.append(ga)
-
-        # 3. Supplemental Intelligence Bank (Authentic source labels only)
-        if len(all_articles) < 15 and self.training_bank:
-            import random
-            shuffled = list(self.training_bank)
-            time_seed = int(now // 300)
-            rng = random.Random(time_seed)
-            rng.shuffle(shuffled)
-
-            source_map = {
-                "Hormuz": "Reuters Energy Wire",
-                "Bab-el-Mandeb": "UKMTO Maritime Intelligence",
-                "Suez": "Bloomberg Shipping Intelligence",
-                "Malacca": "Lloyd's List Maritime",
-                "Cape of Good Hope": "Platts Global Bunker Wire"
-            }
-
-            for item in shuffled:
-                c = item.get("corridor", "Hormuz")
-                if c not in CORRIDORS:
+        raw: List[Dict[str, Any]] = []
+        provider_status: Dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=len(providers)) as executor:
+            futures = {executor.submit(fn): name for name, fn in providers.items()}
+            for f in as_completed(futures):
+                name = futures[f]
+                try:
+                    items = f.result()
+                except Exception as e:
+                    provider_status[name] = {"configured": True, "ok": False, "error": _describe_error(e)}
                     continue
-                t = item.get("headline", "")
-                if t and not any(a["title"].lower() == t.lower() for a in all_articles):
-                    raw_src = item.get("source", "")
-                    clean_src = raw_src if (raw_src and "llama" not in raw_src.lower() and "ground" not in raw_src.lower()) else source_map.get(c, "Maritime Intelligence Wire")
-                    
-                    all_articles.append({
-                        "corridor": c,
-                        "title": t,
-                        "supplier": CORRIDOR_CONFIG[c]["primary_suppliers"][0],
-                        "source": clean_src,
-                        "risk_score": float(item.get("risk_score", 5.0)),
-                        "reason": item.get("summary", "Model calibrated geopolitical risk evaluation on strategic corridor.")
-                    })
-                if len(all_articles) >= 30:
-                    break
+                if items is None:
+                    provider_status[name] = {"configured": False, "ok": False}
+                    continue
+                provider_status[name] = {"configured": True, "ok": True, "count": len(items)}
+                raw.extend(dict(item, provider=name) for item in items)
 
-        if all_articles:
-            self.cache_data = {
-                "last_updated": now,
-                "source": "newsapi_and_gdelt_live",
-                "articles": all_articles
-            }
-            self.last_fetch_time = now
-            self._save_cache(self.cache_data)
+        # Newest first across providers; drop duplicates and off-topic articles
+        seen_titles = set()
+        articles: List[Dict[str, Any]] = []
+        for item in sorted(raw, key=lambda a: a.get("published_at") or "", reverse=True):
+            title = (item.get("title") or "").strip()
+            title_key = re.sub(r"\W+", " ", title.lower()).strip()
+            if len(title) < 15 or title == "[Removed]" or title_key in seen_titles:
+                continue
+            corridor = self._match_corridor(f"{title} {item.get('description') or ''}")
+            if not corridor:
+                continue
+            seen_titles.add(title_key)
+
+            ev = self._run_model_inference(title, corridor, item.get("source") or item["provider"])
+            ev.update({
+                "provider": item["provider"],
+                "url": item.get("url") or "",
+                "published_at": item.get("published_at") or "",
+                "fetched_at": fetched_at,
+            })
+            articles.append(ev)
+            if len(articles) >= MAX_ARTICLES:
+                break
+
+        # If every provider failed, keep serving the last real headlines (they carry their fetched_at)
+        self.cache_data = {
+            "schema": CACHE_SCHEMA,
+            "last_updated": now if articles else self.cache_data.get("last_updated", 0.0),
+            "last_attempt": now,
+            "providers": provider_status,
+            "articles": articles or self.cache_data.get("articles", []),
+        }
+        self.last_fetch_time = now
+        self._save_cache(self.cache_data)
 
     def fetch_all_live_headlines(self) -> List[Dict[str, Any]]:
         """
-        Instant Zero-Latency Fetching (Stale-While-Revalidate):
-        Returns in-memory cached intelligence instantly in < 2ms, while triggering
-        a background network refresh if cache is older than 5 minutes.
+        Stale-while-revalidate: returns cached headlines immediately and triggers a
+        background refresh when the last attempt is older than NEWS_REFRESH_SECONDS.
         """
-        now = time.time()
-        cached = self.cache_data.get("articles", [])
-
-        # If cache is older than 300s (5 minutes), trigger non-blocking background refresh
-        if (now - self.last_fetch_time) > 300:
+        if time.time() - self.last_fetch_time > NEWS_REFRESH_SECONDS:
             self._trigger_background_refresh()
+        return self.cache_data.get("articles", [])
 
-        # If we have cache, return immediately (< 2ms response time)
-        if cached and len(cached) >= 5:
-            return cached
-
-        # If cache is completely empty on boot, run once or return seed
-        if not cached:
-            self._perform_live_network_refresh()
-
-        return self.cache_data.get("articles", SEED_HEADLINES)
+    def get_feed_status(self) -> Dict[str, Any]:
+        """Per-provider health from the last refresh, for the ticker header."""
+        last_updated = self.cache_data.get("last_updated") or 0.0
+        return {
+            "refresh_interval_seconds": NEWS_REFRESH_SECONDS,
+            "last_updated": datetime.fromtimestamp(last_updated, timezone.utc).isoformat(timespec="seconds") if last_updated else None,
+            "providers": self.cache_data.get("providers", {}),
+            "article_count": len(self.cache_data.get("articles", [])),
+        }
 
     def get_live_ticker_headlines(self) -> List[Dict[str, Any]]:
-        """
-        Returns a rich list of evaluated maritime headlines for the Live KrudeAi Stream ticker.
-        """
-        headlines = self.fetch_all_live_headlines()
-        output = []
-        for h in headlines:
-            score = h.get("risk_score", 5.0)
-            src = h.get("source", "Live Maritime Feed")
-            if "llama" in src.lower() or "ground" in src.lower():
-                src = "Reuters Energy Wire"
-
-            output.append({
-                "headline": h.get("title", h.get("headline", "")),
-                "corridor": h.get("corridor", "Hormuz"),
-                "pred": score,
-                "risk_score": score,
-                "source": src,
-                "published_at": h.get("published_at", ""),
-                "reason": h.get("reason", "Model calibrated threat assessment on strategic corridor flow.")
-            })
-        return output
+        """Returns live scored headlines for the ticker, each with its real source and link."""
+        return [{
+            "headline": h.get("title", ""),
+            "corridor": h.get("corridor", ""),
+            "pred": h.get("risk_score", 5.0),
+            "risk_score": h.get("risk_score", 5.0),
+            "source": h.get("source", ""),
+            "provider": h.get("provider", ""),
+            "url": h.get("url", ""),
+            "published_at": h.get("published_at", ""),
+            "fetched_at": h.get("fetched_at", ""),
+            "reason": h.get("reason", ""),
+        } for h in self.fetch_all_live_headlines()]
 
     def _match_corridor(self, text: str) -> Optional[str]:
         text_lower = text.lower()
@@ -605,21 +461,13 @@ class RiskIntelligenceAgent:
                 avg_score = sum(h.get("risk_score", cfg["baseline_risk"]) for h in corridor_headlines) / len(corridor_headlines)
                 top_headline = corridor_headlines[0]
             else:
-                seed = next((s for s in SEED_HEADLINES if s["corridor"] == corridor), None)
-                if seed:
-                    s_score, s_reason, _ = self._query_local_llama_model(seed["title"], corridor)
-                    seed_evaluated = dict(seed)
-                    seed_evaluated["risk_score"] = s_score
-                    seed_evaluated["reason"] = s_reason
-                    avg_score = s_score
-                    top_headline = seed_evaluated
-                else:
-                    avg_score = cfg["baseline_risk"]
-                    top_headline = {
-                        "title": f"Standard transit conditions reported across {cfg['name']}",
-                        "source": "Maritime Domain Intelligence",
-                        "reason": f"Baseline surveillance confirms regular crude tanker movements."
-                    }
+                # No live news for this corridor: fall back to its configured baseline, and say so
+                avg_score = cfg["baseline_risk"]
+                top_headline = {
+                    "title": f"No live headlines for {cfg['name']} in the latest fetch",
+                    "source": None,
+                    "reason": "Score is the corridor's configured baseline risk; no current news signal."
+                }
 
             # Apply user disruption override if provided (e.g. from interactive Earth/slider)
             if custom_disruptions and corridor in custom_disruptions:
@@ -653,7 +501,7 @@ class RiskIntelligenceAgent:
                 "volume_mbpd": cfg["default_volume_mbpd"],
                 "primary_suppliers": cfg["primary_suppliers"],
                 "headline": top_headline.get("title", ""),
-                "headline_source": top_headline.get("source", "GDELT DOC 2.0"),
+                "headline_source": top_headline.get("source"),
                 "affected_supplier": top_headline.get("supplier", cfg["primary_suppliers"][0]),
                 "reason": top_headline.get("reason", "Baseline maritime risk assessment."),
                 "model_engine": "KrudeAi Neural Engine",
