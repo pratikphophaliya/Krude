@@ -63,7 +63,7 @@ class AIModelManager:
         gdp = impacts.get("gdp_impact_pp", 0.3)
         cad = impacts.get("cad_impact_bps", 50.0)
 
-        order_summary = ", ".join([f"{o.get('volume_mbpd', 0.5)} MBPD {o.get('grade', o.get('crude_name', 'Crude'))} from {o.get('country', 'Supplier')}" for o in orders[:3]]) if orders else "West African / US Gulf alternative grades"
+        order_summary = ", ".join([f"{o['allocated_volume_mbpd']} MBPD {o['grade']} from {o['country']}" for o in orders[:3]]) if orders else "West African / US Gulf alternative grades"
 
         narrative = (
             f"### Strategic National Energy Security Assessment\n\n"
@@ -121,7 +121,10 @@ class AIModelManager:
                 disruption_severity_pct=sc["severity_pct"]
             )
             deficit = sim_res["scenario_inputs"]["blocked_supply_mbpd"]
-            proc_res = orchestrator.generate_procurement_plan(required_deficit_mbpd=deficit)
+            # Scenario framing: the disrupted corridor is treated as blocked
+            proc_res = orchestrator.generate_procurement_plan(
+                required_deficit_mbpd=max(0.1, deficit), corridor_p={},
+                blocked_chokepoints=[sc["corridor"].lower().replace("-", "_")])
             brief = self._generate_heuristic_narrative(sim_res, proc_res)
 
             sample = {

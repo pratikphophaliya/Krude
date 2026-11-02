@@ -89,12 +89,14 @@ class ScenarioSimRequest(BaseModel):
     disruption_severity_pct: float = Field(50.0, ge=0.0, le=100.0)
 
 class ProcurementRankRequest(BaseModel):
-    corridor_risk_scores: Optional[Dict[str, float]] = None
+    # Optional analyst override (0-10 per corridor); omitted = live corridor probabilities
+    corridor_risk_scores: Optional[Dict[CorridorName, float]] = None
 
 class ProcurementOptimizeRequest(BaseModel):
     required_deficit_mbpd: float = Field(1.5, ge=0.1, le=10.0)
-    blocked_chokepoints: Optional[List[str]] = Field(default_factory=list)
+    blocked_chokepoints: List[Literal["hormuz", "bab_el_mandeb", "suez", "malacca", "cape_of_good_hope"]] = Field(default_factory=list)
     allow_sanctioned: bool = Field(False)
+    corridor_risk_scores: Optional[Dict[CorridorName, float]] = None
 
 class ReserveDrawdownRequest(BaseModel):
     safety_floor_days: float = Field(3.0, ge=0.0, le=9.0)
@@ -117,8 +119,13 @@ class UnifiedStateRequest(BaseModel):
     custom_corridor_overrides: Optional[Dict[str, float]] = None
 
 class HeadlineAnalysisRequest(BaseModel):
-    headline: str = Field(..., min_length=5, description="Geopolitical or maritime news headline to evaluate")
-    corridor: Optional[str] = Field(None, description="Optional corridor override: Hormuz, Bab-el-Mandeb, etc.")
+    headline: str = Field(..., min_length=5, max_length=500, description="Geopolitical or maritime news headline to evaluate")
+    corridor: Optional[CorridorName] = None
+
+def live_corridor_probabilities(override_scores: Optional[Dict[str, float]] = None) -> Dict[str, float]:
+    """30-day disruption probability per corridor from the live pipeline (optionally analyst-overridden)."""
+    res = risk_agent.calculate_supplier_probabilities(override_scores)
+    return {c["corridor"]: c["p_disruption_30d"] for c in res["corridors"]}
 
 # --- API Endpoints ---
 
@@ -360,21 +367,17 @@ def simulate_scenario(req: ScenarioSimRequest):
 
 @app.post("/api/procurement/rank")
 def rank_procurement(req: ProcurementRankRequest):
-    """Component 3: Ranks suppliers using live risk scores and multi-criteria formula."""
-    if req.corridor_risk_scores is None:
-        risk_res = risk_agent.evaluate_all_corridors()
-        scores = {c["corridor"]: c["risk_score"] for c in risk_res["corridors"]}
-    else:
-        scores = req.corridor_risk_scores
-    return procurement_orchestrator.rank_suppliers(scores)
+    """Component 3: Ranks supplier grades by risk-adjusted landed cost using live corridor probabilities."""
+    return procurement_orchestrator.rank_suppliers(live_corridor_probabilities(req.corridor_risk_scores))
 
 @app.post("/api/procure")
 @app.post("/procure")
 @app.post("/api/procurement/optimize")
 def optimize_procurement(req: ProcurementOptimizeRequest):
-    """Clean Endpoint 3: Adaptive Multi-Source Landed Procurement Optimizer."""
+    """Clean Endpoint 3: LP allocation of the deficit across suppliers and routes (risk-adjusted)."""
     return procurement_orchestrator.generate_procurement_plan(
         required_deficit_mbpd=req.required_deficit_mbpd,
+        corridor_p=live_corridor_probabilities(req.corridor_risk_scores),
         blocked_chokepoints=req.blocked_chokepoints,
         allow_sanctioned=req.allow_sanctioned
     )
@@ -453,7 +456,7 @@ def get_unified_digital_twin_state(req: UnifiedStateRequest):
         disruption_severity_pct=req.disruption_severity_pct
     )
 
-    procurement_data = procurement_orchestrator.rank_suppliers(corridor_scores)
+    procurement_data = procurement_orchestrator.rank_suppliers(live_corridor_probabilities(corridor_scores))
     reserve_data = spr_optimiser.calculate_drawdown(
         safety_floor_days=req.safety_floor_days,
         disruption_duration_days=req.disruption_duration_days

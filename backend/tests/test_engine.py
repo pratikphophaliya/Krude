@@ -90,30 +90,37 @@ class TestKrudeDigitalTwin(unittest.TestCase):
         self.assertAlmostEqual(iraq["max_liftable_kbd"], 1665.1, places=1)
 
     def test_adaptive_procurement_orchestrator(self):
-        """Tests live multi-criteria ranking and landed cost allocation."""
-        # Test 1: Multi-criteria ranking
-        ranked = self.procurement_orchestrator.rank_suppliers({
-            "Hormuz": 8.5,
-            "Bab-el-Mandeb": 7.0,
-            "Malacca": 2.0,
-            "Cape of Good Hope": 1.5,
-            "Suez": 4.0
-        })
-        self.assertIn("ranked_suppliers", ranked)
-        self.assertGreaterEqual(len(ranked["ranked_suppliers"]), 5)
-        self.assertIsNotNone(ranked["optimal_recommendation"])
+        """Risk-adjusted ranking over real options, and an LP plan that avoids blocked chokepoints."""
+        corridor_p = {"Hormuz": 0.10, "Bab-el-Mandeb": 0.08, "Malacca": 0.01, "Cape of Good Hope": 0.01, "Suez": 0.03}
+        ranked = self.procurement_orchestrator.rank_suppliers(corridor_p)
+        options = ranked["ranked_suppliers"]
+        self.assertGreaterEqual(len(options), 5)
+        self.assertEqual(ranked["optimal_recommendation"], options[0])
+        costs = [o["risk_adjusted_cost_usd_bbl"] for o in options]
+        self.assertEqual(costs, sorted(costs), "ranked by risk-adjusted cost")
+        for o in options:
+            self.assertAlmostEqual(o["risk_adjusted_cost_usd_bbl"] - o["landed_cost_usd"],
+                                   o["route_disruption_p"] * 40.0, delta=0.02)
 
-        # Test 2: Multi-source procurement allocation plan
         plan = self.procurement_orchestrator.generate_procurement_plan(
-            required_deficit_mbpd=1.5,
-            blocked_chokepoints=["hormuz"],
-            allow_sanctioned=False
-        )
+            required_deficit_mbpd=1.5, corridor_p=corridor_p, blocked_chokepoints=["hormuz"])
+        self.assertEqual(plan["solver_status"], "Optimal")
         self.assertGreater(plan["procured_volume_mbpd"], 0.0)
-        self.assertGreaterEqual(len(plan["allocated_orders"]), 1)
         for order in plan["allocated_orders"]:
             self.assertNotIn("hormuz", order["chokepoints"].split("|"))
-            self.assertGreater(order["total_landed_cost_usd_bbl"], 0.0)
+
+    def test_procurement_respects_country_and_route_caps(self):
+        """A large deficit must never allocate more than a country's liftable cap or a route's capacity."""
+        from collections import defaultdict
+        plan = self.procurement_orchestrator.generate_procurement_plan(
+            required_deficit_mbpd=8.0, corridor_p={}, allow_sanctioned=True)
+        caps = {s["country"]: s["max_liftable_kbd"] for s in db.get_suppliers()}
+        by_country = defaultdict(float)
+        for order in plan["allocated_orders"]:
+            by_country[order["country"]] += order["allocated_volume_kbd"]
+        for country, kbd in by_country.items():
+            self.assertLessEqual(kbd, caps[country] + 0.5, f"{country} over its liftable cap")
+        self.assertAlmostEqual(plan["procured_volume_mbpd"] + plan["unmet_deficit_mbpd"], 8.0, delta=0.01)
 
     def test_corridor_exposure_lock_2(self):
         """

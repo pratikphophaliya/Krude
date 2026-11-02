@@ -1330,30 +1330,17 @@ async function refreshProcurementOrchestrator() {
   const badgeEl = document.getElementById("proc-source-badge");
   const labelEl = document.getElementById("proc-source-label");
 
-  let corridorScores = {};
+  // Live mode: backend uses the live corridor probabilities. Sim mode: analyst scores from the Threat Board.
+  let corridorScores = null;
   if (activeProcurementMode === "sim") {
-    // Collect from interactive Corridor Threat Board
+    corridorScores = {};
     Object.keys(CHOKEPOINTS_DATA).forEach(k => {
       corridorScores[k] = CHOKEPOINTS_DATA[k].score;
     });
     if (labelEl) labelEl.textContent = "Corridor Threat Board Overrides Active";
     if (badgeEl) badgeEl.style.borderColor = "rgba(245, 158, 11, 0.4)";
   } else {
-    // Stream feed scores
-    try {
-      const res = await fetch("/api/risk/scores");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.corridors) {
-          data.corridors.forEach(c => {
-            corridorScores[c.corridor] = c.risk_score;
-          });
-        }
-      }
-    } catch (e) {
-      corridorScores = { "Hormuz": 6.8, "Bab-el-Mandeb": 7.5, "Suez": 4.5, "Malacca": 2.1, "Cape of Good Hope": 1.2 };
-    }
-    if (labelEl) labelEl.textContent = "KrudeAi Stream Feed Active";
+    if (labelEl) labelEl.textContent = "Live Corridor Probabilities";
     if (badgeEl) badgeEl.style.borderColor = "rgba(16, 185, 129, 0.3)";
   }
 
@@ -1363,76 +1350,54 @@ async function refreshProcurementOrchestrator() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ corridor_risk_scores: corridorScores })
     });
-
-    if (resp.ok) {
-      const data = await resp.json();
-      const ranking = data.ranked_suppliers || data.ranked_options || [];
-      if (ranking && ranking.length > 0) {
-        renderProcurementCards(ranking);
-        return;
-      }
-    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    renderProcurementCards(data.ranked_suppliers || []);
   } catch (err) {
-    console.warn("Using offline procurement ranking calculation:", err);
+    container.textContent = `Procurement ranking unavailable (${err.message}). Is the backend running?`;
   }
-
-  // Fallback dynamic strategic alternative routes
-  const fallbackList = [
-    { rank: 1, supplier: "Brazil", origin_terminal: "Tupi FPSO / Santos", crude_grade: "Lula / Tupi Light", landed_cost_usd: 71.15, cost_usd_bbl: 71.15, searoute_days: 28, spare_capacity_kbd: 340, chokepoint_route: "Cape of Good Hope", status: "Optimal Route", why: "Zero Hormuz exposure, high API grade compatibility (30.5° API, 0.4% S), +340 kbd available charter capacity." },
-    { rank: 2, supplier: "Oman", origin_terminal: "Duqm / Mina Al Fahal", crude_grade: "Oman Blend", landed_cost_usd: 73.10, cost_usd_bbl: 73.10, searoute_days: 7, spare_capacity_kbd: 260, chokepoint_route: "Direct Arabian Sea", status: "Bypass Direct", why: "Bypasses Strait of Hormuz completely; shortest transit (7 days) directly into Mangalore / Kochi refineries." },
-    { rank: 3, supplier: "USA", origin_terminal: "Corpus Christi / LOOP", crude_grade: "WTI Midland", landed_cost_usd: 74.51, cost_usd_bbl: 74.51, searoute_days: 39, spare_capacity_kbd: 300, chokepoint_route: "Cape of Good Hope", status: "Safe Route", why: "High-volume VLCC capacity, no maritime interdiction risk, sweet crude balancing Indian refinery sulfur budgets." },
-    { rank: 4, supplier: "Saudi Arabia", origin_terminal: "Yanbu Red Sea Terminal", crude_grade: "Arab Light / Medium", landed_cost_usd: 72.80, cost_usd_bbl: 72.80, searoute_days: 12, spare_capacity_kbd: 450, chokepoint_route: "Bab-el-Mandeb", status: "Elevated Watch", why: "Pipeline bypass (5.0 MBPD East-West Petroline) shifts crude to Red Sea; carries exposure to southern Bab-el-Mandeb drone activity." },
-    { rank: 5, supplier: "UAE", origin_terminal: "Fujairah Deepwater Hub", crude_grade: "Murban Light", landed_cost_usd: 74.20, cost_usd_bbl: 74.20, searoute_days: 4, spare_capacity_kbd: 500, chokepoint_route: "Direct Arabian Sea", status: "Bypass Direct", why: "1.5 MBPD Habshan-Fujairah (ADCOP) pipeline completely bypasses Strait of Hormuz into Gulf of Oman." },
-    { rank: 6, supplier: "Iraq", origin_terminal: "Ceyhan Mediterranean Hub", crude_grade: "Basrah Medium", landed_cost_usd: 75.90, cost_usd_bbl: 75.90, searoute_days: 24, spare_capacity_kbd: 220, chokepoint_route: "Suez / Mediterranean", status: "Bypass Route", why: "Kirkuk-Ceyhan pipeline bypasses Persian Gulf to Mediterranean terminal; subject to Suez transit availability." },
-    { rank: 7, supplier: "Russia", origin_terminal: "Kozmino Pacific Port", crude_grade: "ESPO Blend", landed_cost_usd: 76.40, cost_usd_bbl: 76.40, searoute_days: 18, spare_capacity_kbd: 350, chokepoint_route: "Malacca Strait", status: "Safe Pacific Route", why: "Direct Pacific voyage to Indian East Coast refineries with low chokepoint interdiction friction." },
-    { rank: 8, supplier: "Nigeria", origin_terminal: "Bonny Offshore Terminal", crude_grade: "Bonny Light", landed_cost_usd: 73.80, cost_usd_bbl: 73.80, searoute_days: 25, spare_capacity_kbd: 280, chokepoint_route: "Cape of Good Hope", status: "Safe Atlantic Route", why: "Atlantic sweet crude with low sulfur content (0.14% S) requiring zero desulfurization refinery penalty." }
-  ];
-  renderProcurementCards(fallbackList);
 }
 
 function renderProcurementCards(ranking) {
   const container = document.getElementById("procurement-list-deck");
   if (!container) return;
 
-  if (!ranking || ranking.length === 0) return;
-
   container.innerHTML = "";
+  if (!ranking.length) {
+    container.textContent = "No liftable supplier options in the dataset.";
+    return;
+  }
   ranking.forEach((item, idx) => {
     const card = document.createElement("div");
     card.className = `procurement-card ${idx === 0 ? 'expanded' : ''}`;
-    const chk = item.chokepoint_route || item.corridor || item.chokepoints_crossed || "Direct Open Ocean";
-    const isSafe = chk.toLowerCase().includes("cape") || chk.toLowerCase().includes("direct") || chk.toLowerCase().includes("pacific");
-    const costVal = parseFloat(item.landed_cost_usd || item.cost_usd_bbl || item.cost || 72.0);
-    const transitDays = item.searoute_days || item.transit_time_days || item.days || 25;
-    const spareVol = item.spare_capacity_kbd || (item.capacity_mbpd ? Math.round(item.capacity_mbpd * 1000) : 250);
-    const terminalName = item.origin_terminal || item.grade || item.crude_grade || "Primary Hub";
-    const supplierName = item.supplier || item.name || "Alternative Source";
+    const routeRisk = item.route_disruption_p;
+    const riskClass = routeRisk >= 0.07 ? "threat-red" : (routeRisk >= 0.02 ? "threat-amber" : "threat-green");
 
     card.innerHTML = `
       <div class="pc-top-row">
-        <span class="pc-rank ${idx === 0 ? 'rank-top' : ''}">#${item.rank || idx + 1}</span>
+        <span class="pc-rank ${idx === 0 ? 'rank-top' : ''}">#${item.rank}</span>
         <div class="pc-supplier-info">
-          <span class="pc-supplier-name">${supplierName} (${terminalName})</span>
+          <span class="pc-supplier-name">${item.supplier} (${item.crude_grade})</span>
         </div>
         <div class="pc-metric">
-          <span class="pcm-label">Landed Cost</span>
-          <span class="pcm-val font-mono">$${costVal.toFixed(2)}/bbl</span>
+          <span class="pcm-label">Landed / Risk-Adj.</span>
+          <span class="pcm-val font-mono">$${item.landed_cost_usd.toFixed(2)} / $${item.risk_adjusted_cost_usd_bbl.toFixed(2)}</span>
         </div>
         <div class="pc-metric">
           <span class="pcm-label">Searoute Transit</span>
-          <span class="pcm-val font-mono">${transitDays} days</span>
+          <span class="pcm-val font-mono">${item.searoute_days} days</span>
         </div>
         <div class="pc-metric">
-          <span class="pcm-label">Spare Volume</span>
-          <span class="pcm-val font-mono text-green">+${spareVol} kbd</span>
+          <span class="pcm-label">Max Liftable</span>
+          <span class="pcm-val font-mono text-green">${Math.round(item.max_liftable_kbd).toLocaleString()} kbd</span>
         </div>
         <div class="pc-metric">
-          <span class="pcm-label">Corridor Route</span>
-          <span class="threat-pill ${isSafe ? 'threat-green' : 'threat-amber'}">${chk}</span>
+          <span class="pcm-label">Route (30d risk)</span>
+          <span class="threat-pill ${riskClass}">${item.chokepoint_route} · ${(routeRisk * 100).toFixed(1)}%</span>
         </div>
       </div>
       <div class="pc-expander">
-        <p><strong>Optimization Rationale:</strong> ${item.why || item.notes || `Ranked #${item.rank || idx + 1}: Optimal replacement volume with calibrated landed crude parity and refinery API compatibility.`}</p>
+        <p><strong>Why this rank:</strong> ${item.why}</p>
       </div>
     `;
 
