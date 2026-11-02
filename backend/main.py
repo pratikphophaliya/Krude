@@ -13,12 +13,14 @@ Honesty & Truthfulness Mapping:
 - Component 5: Supply Chain Digital Twin — Unified state-based dashboard
 """
 
+import os
 import sys
 import json
 import time
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, List, Literal
 
 # Setup directories
 BASE_DIR = Path(__file__).resolve().parent
@@ -46,25 +48,28 @@ from engine.spr_optimiser import StrategicReserveOptimiser
 from engine.fine_tuning_adapter import AIModelManager
 from engine.live_poller import live_manager
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Starts the live SSE broadcast loop with the shared risk agent."""
+    live_manager.start_live_poller(risk_agent)
+    yield
+    live_manager.stop_live_poller()
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Krude - Energy Supply Chain Digital Twin",
     description="Unified DuckDB/SQLite energy intelligence platform with real Searoute marine graphs, fine-tuned Llama 3.2 3B + LoRA AI model, crude quality penalties, and live procurement optimization.",
     version="3.2.0"
 )
 
-# Enable CORS for development
+# The dashboard is served from this app (same origin); only listed origins may call the API cross-site
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=os.getenv("CORS_ORIGINS", "http://127.0.0.1:8000,http://localhost:8000").split(","),
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
-
-@app.on_event("startup")
-async def startup_event():
-    """Starts the live SSE broadcast loop on server startup."""
-    live_manager.start_live_poller(risk_agent)
 
 # Initialize engines
 risk_agent = RiskIntelligenceAgent(DATA_DIR, MODELS_DIR)
@@ -74,8 +79,10 @@ spr_optimiser = StrategicReserveOptimiser()
 model_manager = AIModelManager(DATA_DIR, MODELS_DIR)
 
 # Schemas
+CorridorName = Literal["Hormuz", "Bab-el-Mandeb", "Malacca", "Cape of Good Hope", "Suez"]
+
 class ScenarioSimRequest(BaseModel):
-    corridor: str = Field("Hormuz", description="Chosen corridor: Hormuz, Bab-el-Mandeb, Malacca, Cape of Good Hope, Suez")
+    corridor: CorridorName = "Hormuz"
     disruption_duration_days: int = Field(30, ge=1, le=180)
     price_rise_usd_per_barrel: float = Field(15.0, ge=0.0, le=150.0)
     net_shortfall_pct: float = Field(22.5, ge=0.0, le=100.0)
@@ -101,7 +108,7 @@ class ReserveLPOptimizeRequest(BaseModel):
     cape_rerouted_kbd: float = Field(1100.0, ge=0.0, le=3000.0)
 
 class UnifiedStateRequest(BaseModel):
-    selected_corridor: str = "Hormuz"
+    selected_corridor: CorridorName = "Hormuz"
     disruption_severity_pct: float = 50.0
     disruption_duration_days: int = 30
     price_rise_usd_per_barrel: float = 15.0
@@ -237,6 +244,7 @@ def get_db_supply_nodes():
 # --- Risk & Simulation Endpoints ---
 
 @app.get("/api/risk")
+@app.get("/risk")
 @app.get("/api/risk/live")
 @app.get("/api/risk/scores")
 def get_corridor_risk_scores():
@@ -262,7 +270,7 @@ def get_feed_status():
     return risk_agent.get_feed_status()
 
 @app.get("/api/risk/timeline")
-def get_corridor_timeline(corridor: str = Query("Hormuz", description="Corridor name: Hormuz, Bab-el-Mandeb, etc.")):
+def get_corridor_timeline(corridor: CorridorName = Query("Hormuz")):
     """
     Lock 1: Historical Threat Index Timeline (18-Month Chronology)
     Returns daily P(t), P(disruption/30d), P(closure/30d), and Brent spot price overlay.
@@ -286,7 +294,7 @@ def get_supply_disruption_probabilities():
     return risk_agent.calculate_supplier_probabilities()
 
 @app.get("/api/risk/empirical-validation")
-def get_empirical_validation(corridor: str = Query("Hormuz", description="Corridor to validate against Brent crude")):
+def get_empirical_validation(corridor: CorridorName = Query("Hormuz")):
     """
     Empirical Evidence Deliverable:
     Validates Hormuz disruption risk index against real Brent crude spot prices ($/bbl).
@@ -318,7 +326,7 @@ def get_empirical_validation(corridor: str = Query("Hormuz", description="Corrid
     }
 
 @app.get("/api/risk/plot")
-def get_corridor_plot(corridor: str = Query("Hormuz", description="Corridor name"), format: str = Query("svg", description="Format: svg or png")):
+def get_corridor_plot(corridor: CorridorName = Query("Hormuz"), format: Literal["svg", "png"] = Query("svg")):
     """
     Returns visual 18-month risk plot for the corridor.
     """
@@ -336,12 +344,6 @@ def get_corridor_plot(corridor: str = Query("Hormuz", description="Corridor name
 # ==============================================================================
 # BLOCK 5: FOUR CLEAN CORE ENDPOINTS (/risk, /scenario, /procure, /reserve)
 # ==============================================================================
-
-@app.get("/api/risk")
-@app.get("/risk")
-def get_clean_risk():
-    """Clean Endpoint 1: Live Corridor Risk Intelligence & Calibrated Threat Scores."""
-    return risk_agent.evaluate_all_corridors()
 
 @app.post("/api/scenario")
 @app.post("/scenario")
