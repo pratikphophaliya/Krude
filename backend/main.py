@@ -201,11 +201,6 @@ def get_db_ofac(country: Optional[str] = None):
     """Returns OFAC sanctions and restricted supplier records."""
     return db.get_ofac_entities(country=country)
 
-@app.get("/api/database/headlines")
-def get_db_headlines(corridor: Optional[str] = None):
-    """Returns recent maritime risk headlines."""
-    return db.get_headlines(corridor=corridor)
-
 @app.get("/api/database/landed-options")
 def get_db_landed_options():
     """Returns full analytical view of landed procurement options with quality and freight breakdowns."""
@@ -215,36 +210,6 @@ def get_db_landed_options():
 def get_db_corridor_exposure():
     """Returns 3-month trailing average import barrel volume sitting behind each chokepoint."""
     return db.get_corridor_exposure()
-
-@app.get("/api/database/refineries")
-def get_db_refineries():
-    """Returns all 16 Indian refinery nodes with Nelson Complexity and SPR connectivity."""
-    import json
-    ref_file = DATA_DIR / "refineries.json"
-    if ref_file.exists():
-        with open(ref_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-@app.get("/api/database/compatibility")
-def get_db_compatibility():
-    """Returns crude quality compatibility and substitution matrix."""
-    import json
-    comp_file = DATA_DIR / "crude_compatibility_matrix.json"
-    if comp_file.exists():
-        with open(comp_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-@app.get("/api/database/supply-nodes")
-def get_db_supply_nodes():
-    """Returns global supplier spare capacities and Hormuz bypass pipeline routes."""
-    import json
-    sup_file = DATA_DIR / "global_supply_nodes.json"
-    if sup_file.exists():
-        with open(sup_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
 
 # --- Risk & Simulation Endpoints ---
 

@@ -348,8 +348,8 @@ class RiskPipeline:
     """
 
     def __init__(self, headlines: Optional[List[Dict[str, Any]]] = None):
-        # Explicit list (live history) is used as-is, even if empty; None means the curated historical CSV
-        self.headlines = headlines if headlines is not None else self._load_headlines_from_csv()
+        # Explicit list (live history) is used as-is, even if empty; None means the curated event list below
+        self.headlines = headlines if headlines is not None else HISTORICAL_HEADLINES_DATA
         self.half_life_days = 7.0   # Decay half-life (t_1/2 = 7 days)
         self.decay_lambda = math.log(2.0) / self.half_life_days
         self.momentum_weight = 0.40 # Acceleration factor for rising crisis
@@ -360,46 +360,6 @@ class RiskPipeline:
             "Malacca": 1.00,         # Unsanctioned commercial route
             "Cape of Good Hope": 1.00 # Unsanctioned open ocean route
         }
-
-    def _load_headlines_from_csv(self) -> List[Dict[str, Any]]:
-        """Loads headlines dataset from headlines.csv with fallback to seed data."""
-        csv_file = DATA_DIR / "headlines.csv"
-        if csv_file.exists():
-            try:
-                import csv
-                loaded = []
-                with open(csv_file, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        raw_date = row.get("timestamp") or row.get("ts") or row.get("date") or "2026-08-20"
-                        if "T" in raw_date:
-                            clean_date = raw_date.split("T")[0]
-                        else:
-                            clean_date = raw_date[:10]
-                        
-                        try:
-                            score = float(row.get("risk_score", 5.0))
-                        except ValueError:
-                            score = 5.0
-
-                        loaded.append({
-                            "date": clean_date,
-                            "corridor": row.get("corridor", "Other"),
-                            "title": row.get("headline", ""),
-                            "source": row.get("source", "Maritime Intelligence"),
-                            "raw_score": score,
-                            "event_cluster": row.get("event_type") or row.get("summary") or row.get("id") or f"{row.get('corridor')}_{clean_date}"
-                        })
-                if len(loaded) >= 10:
-                    # Merge with historical benchmark tension seeds
-                    existing_dates = {h["date"] + h["corridor"] for h in loaded}
-                    for seed in HISTORICAL_HEADLINES_DATA:
-                        if seed["date"] + seed["corridor"] not in existing_dates:
-                            loaded.append(seed)
-                    return loaded
-            except Exception:
-                pass
-        return HISTORICAL_HEADLINES_DATA
 
     def dedupe(self, headlines: List[Dict[str, Any]], window_hours: float = 36.0) -> List[Dict[str, Any]]:
         """

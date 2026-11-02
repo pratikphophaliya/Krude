@@ -1,12 +1,11 @@
 """
 Krude - Unified Database Loader (DuckDB & SQLite)
 ==============================================================
-Loads all five core domain files into a single unified database:
-1. headlines.csv -> `headlines` table
-2. ofac.csv -> `ofac` table
-3. routes_expanded.csv -> `routes` table
-4. imports_long.csv -> `imports` table (melted long: month, country, volume_kbd)
-5. suppliers.csv -> `suppliers` table (with crude quality penalty & max_liftable_kbd)
+Loads the core domain files into a single unified database:
+1. ofac.csv -> `ofac` table (built by build_ofac_real.py)
+2. routes_expanded.csv -> `routes` table
+3. imports_long.csv -> `imports` table (melted long: month, country, volume_kbd)
+4. suppliers.csv -> `suppliers` table (with crude quality penalty & max_liftable_kbd)
 
 Provides fast analytical SQL queries, views, and dual DuckDB/SQLite storage.
 """
@@ -21,13 +20,11 @@ try:
     from data.melt_imports import generate_wide_imports_csv, melt_wide_to_long
     from data.build_suppliers import build_suppliers_csv
     from data.build_routes import build_routes_csv
-    from data.generate_reference_data import build_ofac_csv, build_headlines_csv
     from data.corridor_exposure import compute_corridor_exposure
 except ImportError:
     from melt_imports import generate_wide_imports_csv, melt_wide_to_long
     from build_suppliers import build_suppliers_csv
     from build_routes import build_routes_csv
-    from generate_reference_data import build_ofac_csv, build_headlines_csv
     from corridor_exposure import compute_corridor_exposure
 
 DATA_DIR = Path(__file__).resolve().parent
@@ -52,13 +49,6 @@ def prepare_all_source_files():
     if not r_path.exists():
         build_routes_csv(r_path)
         
-    # 4. OFAC sanctions
-    if not (DATA_DIR / "ofac.csv").exists():
-        build_ofac_csv(DATA_DIR / "ofac.csv")
-    
-    # 5. Headlines
-    if not (DATA_DIR / "headlines.csv").exists():
-        build_headlines_csv(DATA_DIR / "headlines.csv")
     print("[OK] All source files verified.")
 
 def load_duckdb(duckdb_path: Path = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
@@ -67,9 +57,6 @@ def load_duckdb(duckdb_path: Path = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
     
     # Connect
     con = duckdb.connect(str(duckdb_path))
-    
-    # Ingest 1. headlines
-    con.execute("CREATE OR REPLACE TABLE headlines AS SELECT * FROM read_csv_auto(?, ignore_errors=true)", [str(DATA_DIR / "headlines.csv")])
     
     # Ingest 2. ofac
     con.execute("CREATE OR REPLACE TABLE ofac AS SELECT * FROM read_csv_auto(?, ignore_errors=true)", [str(DATA_DIR / "ofac.csv")])
@@ -113,7 +100,7 @@ def load_duckdb(duckdb_path: Path = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
     """)
 
     # Print summary counts
-    tables = ["headlines", "ofac", "routes", "imports", "suppliers"]
+    tables = ["ofac", "routes", "imports", "suppliers"]
     print("\n--- DuckDB Table Statistics ---")
     for t in tables:
         count = con.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
@@ -137,7 +124,6 @@ def load_sqlite(sqlite_path: Path = SQLITE_PATH) -> Path:
     
     # Read via pandas and write to sqlite
     for tbl, fname in [
-        ("headlines", "headlines.csv"),
         ("ofac", "ofac.csv"),
         ("routes", "routes_expanded.csv"),
         ("imports", "imports_long.csv"),

@@ -32,12 +32,11 @@ class TestKrudeDigitalTwin(unittest.TestCase):
         cls.spr_optimiser = StrategicReserveOptimiser()
 
     def test_database_tables_and_row_counts(self):
-        """Tests that all 5 tables exist in DuckDB with expected records."""
+        """Tests that the core tables exist in DuckDB with expected records."""
         summary = db.get_database_summary()
         self.assertEqual(summary["status"], "ONLINE")
         counts = summary["table_counts"]
         
-        self.assertGreaterEqual(counts.get("headlines", 0), 5, "Headlines table should have >=5 rows")
         self.assertGreaterEqual(counts.get("ofac", 0), 10, "OFAC table should have >=10 rows")
         self.assertGreaterEqual(counts.get("routes", 0), 50, "Routes table should have >=50 rows")
         self.assertGreaterEqual(counts.get("imports", 0), 200, "Imports table should have >=200 rows")
@@ -283,20 +282,6 @@ class TestKrudeDigitalTwin(unittest.TestCase):
         self.assertEqual(red_sea["gap_days"], 12, "Red Sea cargoes reroute via the Cape (+12 days)")
         self.assertEqual(red_sea["gap_kbd_by_day"][12], 0.0)
         self.assertLess(red_sea["price_rise_usd"], hormuz["price_rise_usd"])
-
-    def test_block5_maritime_graph(self):
-        """Validates Block 5 NetworkX supply chain graph topology."""
-        from engine.maritime_graph import MaritimeSupplyGraph
-        mg = MaritimeSupplyGraph()
-        summary = mg.get_graph_summary()
-        self.assertGreater(summary["total_nodes"], 50)
-        self.assertGreater(summary["total_edges"], 60)
-        self.assertIn("Hormuz", summary["chokepoints"])
-        self.assertIn("Cape Of Good Hope", summary["chokepoints"])
-        
-        # Test bypass routing
-        bypass = mg.find_bypass_routes("Hormuz")
-        self.assertGreater(len(bypass), 20)
 
     def test_block4_reserve_lp_optimization(self):
         """SPR LP: draw limits, adaptive floor, gap covered first, consistent days-of-cover accounting."""

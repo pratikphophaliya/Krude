@@ -1,8 +1,7 @@
 """
 Krude - Unified Database Client (DuckDB & SQLite)
 ==============================================================
-Provides high-performance query execution and analytics over the 5 core tables:
-- headlines
+Provides high-performance query execution and analytics over the core tables:
 - ofac
 - routes
 - imports (melted long format)
@@ -88,15 +87,6 @@ class EnergyTwinDB:
             return self.query_duckdb(query, [country])
         else:
             query = "SELECT * FROM imports ORDER BY month ASC, country ASC"
-            return self.query_duckdb(query)
-
-    def get_headlines(self, corridor: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Returns recent maritime risk headlines."""
-        if corridor:
-            query = "SELECT * FROM headlines WHERE corridor = ? ORDER BY timestamp DESC"
-            return self.query_duckdb(query, [corridor])
-        else:
-            query = "SELECT * FROM headlines ORDER BY timestamp DESC"
             return self.query_duckdb(query)
 
     def get_ofac_entities(self, country: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -195,9 +185,9 @@ class EnergyTwinDB:
         return compute_corridor_exposure(self.duckdb_path)
 
     def get_database_summary(self) -> Dict[str, Any]:
-        """Returns statistics and metadata across all 5 tables in DuckDB."""
+        """Returns statistics and metadata across the core tables in DuckDB."""
         stats = {}
-        for tbl in ["headlines", "ofac", "routes", "imports", "suppliers"]:
+        for tbl in ["ofac", "routes", "imports", "suppliers"]:
             count_res = self.query_duckdb(f"SELECT count(*) as cnt FROM {tbl}")
             stats[tbl] = count_res[0]["cnt"] if count_res else 0
         return {
