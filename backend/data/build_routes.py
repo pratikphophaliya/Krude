@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 
 warnings.filterwarnings("ignore")
-import searoute as sr
 
 DATA_DIR = Path(__file__).resolve().parent
 
@@ -65,6 +64,7 @@ def get_route(o: List[float], d: List[float], blocked: Tuple[str, ...] = ()) -> 
     Queries `searoute` graph routing with restrictions.
     Returns (distance_km, coordinate_linestring) or None if no valid marine path exists.
     """
+    import searoute as sr  # only needed to regenerate routes_expanded.csv (pip install searoute)
     try:
         r = sr.searoute(o, d, units="km", speed_knot=SPEED_KNOTS,
                         restrictions=["northwest", *blocked])

@@ -40,7 +40,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from engine.database import db
+# First run (fresh clone): build the DuckDB/SQLite database from the CSVs in backend/data
+from engine.database import db, DUCKDB_PATH
+if not DUCKDB_PATH.exists():
+    from data.db_loader import build_all
+    build_all()
+
 from engine.risk_intel import RiskIntelligenceAgent, CORRIDORS
 from engine.scenario_modeller import DisruptionScenarioModeller, run_scenario
 from engine.procurement_orchestrator import AdaptiveProcurementOrchestrator

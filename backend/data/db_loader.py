@@ -17,12 +17,12 @@ import duckdb
 import pandas as pd
 
 try:
-    from data.melt_imports import generate_wide_imports_csv, melt_wide_to_long
+    from data.melt_imports import melt_wide_to_long
     from data.build_suppliers import build_suppliers_csv
     from data.build_routes import build_routes_csv
     from data.corridor_exposure import compute_corridor_exposure
 except ImportError:
-    from melt_imports import generate_wide_imports_csv, melt_wide_to_long
+    from melt_imports import melt_wide_to_long
     from build_suppliers import build_suppliers_csv
     from build_routes import build_routes_csv
     from corridor_exposure import compute_corridor_exposure
@@ -37,8 +37,6 @@ def prepare_all_source_files():
     
     # 1. Imports (wide + melted long)
     w_path = DATA_DIR / "imports_wide.csv"
-    if not w_path.exists():
-        generate_wide_imports_csv(w_path)
     l_path = melt_wide_to_long(w_path, DATA_DIR / "imports_long.csv")
     
     # 2. Suppliers (quality adjustment + max liftable kbd)
