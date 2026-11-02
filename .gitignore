@@ -79,3 +79,4 @@ yarn-debug.log*
 yarn-error.log*
 backend/data/brent_history.csv
 backend/data/usd_inr_history.csv
+backend/data/gdelt_volume_*.json

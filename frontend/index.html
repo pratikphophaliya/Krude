@@ -686,81 +686,25 @@
     <section id="risk-vs-brent" class="section-container">
       <div class="section-header-block">
         <h2 class="section-main-heading">Geopolitical Risk vs Brent Crude</h2>
-        <p class="section-sub-heading">Historical lead indicator validation: KrudeAi risk index spikes lead
-          physical spot price moves by 6 days.</p>
+        <p class="section-sub-heading" id="validation-verdict">Testing whether Hormuz news intensity led Brent since 2024&hellip;</p>
       </div>
 
       <div class="chart-panel-frame">
 
-        <!-- Historical Escalation Events: Prediction vs Reality Ledger -->
-        <div class="events-truth-deck">
-          <div class="et-card">
-            <div class="et-header">
-              <span class="et-date">Apr 2024</span>
-              <span class="threat-pill threat-red">Spike</span>
-            </div>
-            <h4 class="et-title">MSC Aries Seizure & Retaliatory Strikes</h4>
-            <div class="et-comparison">
-              <div class="etc-item">
-                <span class="etc-lbl">Predicted Risk P(t):</span>
-                <span class="etc-val text-amber font-mono">9.4 / 10 (Critical)</span>
-              </div>
-              <div class="etc-item">
-                <span class="etc-lbl">Market Reality:</span>
-                <span class="etc-val text-white font-mono">Brent surged to $91.2/bbl (+6d lag)</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="et-card">
-            <div class="et-header">
-              <span class="et-date">Oct 2024</span>
-              <span class="threat-pill threat-red">Spike</span>
-            </div>
-            <h4 class="et-title">180 Ballistic Missiles & Kharg Threat</h4>
-            <div class="et-comparison">
-              <div class="etc-item">
-                <span class="etc-lbl">Predicted Risk P(t):</span>
-                <span class="etc-val text-amber font-mono">9.8 / 10 (Maximum)</span>
-              </div>
-              <div class="etc-item">
-                <span class="etc-lbl">Market Reality:</span>
-                <span class="etc-val text-white font-mono">War-risk insurance surged +400%</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="et-card">
-            <div class="et-header">
-              <span class="et-date">Jan 2026</span>
-              <span class="threat-pill threat-red">Spike</span>
-            </div>
-            <h4 class="et-title">Persian Gulf Jamming & Interdictions</h4>
-            <div class="et-comparison">
-              <div class="etc-item">
-                <span class="etc-lbl">Predicted Risk P(t):</span>
-                <span class="etc-val text-amber font-mono">9.1 / 10 (Severe)</span>
-              </div>
-              <div class="etc-item">
-                <span class="etc-lbl">Market Reality:</span>
-                <span class="etc-val text-white font-mono">VLCC daily charter: $88,500/day</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <!-- Largest news-intensity spikes and what Brent did next (computed by /api/risk/empirical-validation) -->
+        <div class="events-truth-deck" id="validation-events"></div>
 
         <!-- Empirical Validation: Risk vs Brent Spot Dual-Axis Overlay -->
         <div class="empirical-validation-deck">
           <div class="empirical-card-header">
             <div class="ech-left">
-              <h3 class="ech-title">Hormuz Threat Index P(t) vs Historical Brent Crude Spot ($/bbl)</h3>
-              <p class="ech-desc">Dual-axis correlation: Model-predicted risk spikes systematically precede and align with
-                real physical energy price surges.</p>
+              <h3 class="ech-title">Hormuz News Intensity (GDELT) vs Brent Spot ($/bbl, FRED)</h3>
+              <p class="ech-desc" id="validation-stats">Share of global news coverage mentioning Hormuz with tanker/oil terms (7-day mean, per million articles) against the daily Brent spot price.</p>
             </div>
             <div class="ech-legend">
-              <span class="legend-item"><span class="leg-color bg-amber"></span> Predicted Threat Index P(t)</span>
+              <span class="legend-item"><span class="leg-color bg-amber"></span> News intensity (GDELT)</span>
               <span class="legend-item"><span class="leg-color bg-white"></span> Brent Spot ($/bbl)</span>
-              <span class="legend-item"><span class="leg-dot bg-red"></span> Geopolitical Kinetic Shock</span>
+              <span class="legend-item"><span class="leg-dot bg-red"></span> Largest coverage spikes</span>
             </div>
           </div>
 

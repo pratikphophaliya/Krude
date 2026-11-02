@@ -225,6 +225,34 @@ class TestKrudeDigitalTwin(unittest.TestCase):
         quiet = agent_with({}).calculate_supplier_probabilities()
         self.assertTrue(all(c["p_disruption_30d"] < 0.01 for c in quiet["corridors"]), "no news -> quiet floor")
 
+    def test_empirical_validation_finds_a_planted_lead(self):
+        """With synthetic news that leads price by 3 days, the lead-lag test finds lag 3; no data -> UNAVAILABLE."""
+        import math
+        import random
+        from datetime import date, timedelta
+        from unittest import mock
+        from engine import validation
+
+        rng = random.Random(7)
+        days = [(date(2024, 1, 1) + timedelta(days=i)).isoformat() for i in range(400)]
+        shocks = [rng.gauss(0, 1) for _ in days]
+        news = {d: 50 + 10 * shocks[i] for i, d in enumerate(days)}
+        # Brent log return on day t driven by the 5-day news change three days earlier
+        price, brent = 80.0, {}
+        for i, d in enumerate(days):
+            if i >= 8:
+                price *= math.exp(0.002 * (shocks[i - 3] - shocks[i - 8]) + rng.gauss(0, 0.001))
+            brent[d] = price
+
+        with mock.patch.object(validation, "get_news_intensity", return_value={"series": news, "fetched_at": "test", "query": "q"}),              mock.patch.object(validation, "get_brent_history", return_value=brent):
+            res = validation.validate("Hormuz")
+        self.assertEqual(res["status"], "COMPUTED")
+        self.assertIn(res["best_lead"]["lag_days"], (3, 4, 5))
+        self.assertLess(res["best_lead"]["p_value"], 0.05)
+
+        with mock.patch.object(validation, "get_news_intensity", return_value=None):
+            self.assertEqual(validation.validate("Hormuz")["status"], "UNAVAILABLE")
+
     def test_keyword_fallback_is_labelled_when_ollama_down(self):
         """With Ollama unreachable, scores come from the keyword engine and say so."""
         import os
