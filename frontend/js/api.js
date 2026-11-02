@@ -99,19 +99,6 @@ const API = {
     return await res.json();
   },
 
-  async setModelBackend(payload) {
-    const res = await fetch(`${API_BASE}/api/model/set-backend`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || "Failed to switch model backend");
-    }
-    return await res.json();
-  },
-
   async exportTrainingDataset() {
     const res = await fetch(`${API_BASE}/api/model/export-dataset`, {
       method: "POST"

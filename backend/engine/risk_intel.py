@@ -27,7 +27,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import requests
 
 try:
@@ -39,13 +39,16 @@ except ImportError:
 try:
     from engine.risk_pipeline import RiskPipeline
     from engine.database import db
+    from engine.scoring import score_headline
 except ImportError:
     try:
         from backend.engine.risk_pipeline import RiskPipeline
         from backend.engine.database import db
+        from backend.engine.scoring import score_headline
     except ImportError:
         from risk_pipeline import RiskPipeline
         from database import db
+        from scoring import score_headline
 
 CORRIDORS = ["Hormuz", "Bab-el-Mandeb", "Malacca", "Cape of Good Hope", "Suez"]
 
@@ -106,7 +109,7 @@ CORRIDOR_CONFIG = {
 # 100 req/day free tiers of NewsAPI and GNews.
 NEWS_REFRESH_SECONDS = int(os.getenv("NEWS_REFRESH_SECONDS", "900"))
 MAX_ARTICLES = 40
-CACHE_SCHEMA = 2  # bump to discard caches written by older code (which mixed in training headlines)
+CACHE_SCHEMA = 3  # bump to discard caches written by older code (v1 mixed in training headlines, v2 mislabelled engines)
 
 # One combined query per provider; the corridor is assigned afterwards from the article text.
 NEWSAPI_QUERY = ('("Strait of Hormuz" OR "Persian Gulf" OR "Red Sea" OR Houthi OR "Bab-el-Mandeb" '
@@ -129,7 +132,8 @@ class RiskIntelligenceAgent:
     """
     Component 1: Risk Intelligence Agent (REAL)
     Fetches live headlines from NewsAPI, GNews and GDELT for the 5 corridors and scores
-    each one with the KrudeAi model. Every headline keeps its real outlet, provider and URL.
+    each one (KrudeAi model, keyword fallback). Every headline keeps its real outlet, provider,
+    URL and the engine that scored it.
     """
     def __init__(self, data_dir: Path, models_dir: Optional[Path] = None):
         self.data_dir = data_dir
@@ -318,6 +322,7 @@ class RiskIntelligenceAgent:
             "published_at": h.get("published_at", ""),
             "fetched_at": h.get("fetched_at", ""),
             "reason": h.get("reason", ""),
+            "engine": h.get("model_used", ""),
         } for h in self.fetch_all_live_headlines()]
 
     def _match_corridor(self, text: str) -> Optional[str]:
@@ -334,115 +339,31 @@ class RiskIntelligenceAgent:
             return "Suez"
         return None
 
-    def _query_local_llama_model(self, headline: str, corridor: str) -> Tuple[float, str, str]:
-        """
-        Executes fine-tuned KrudeAi model (Krude-risk) running on local Ollama engine.
-        Model produces:
-        Line 1: Risk Score (0-10)
-        Line 2+: Geopolitical Reasoning
-        """
-        prompt = headline.strip()
-        url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": "Krude-risk",
-            "prompt": prompt,
-            "stream": False,
-            "keep_alive": "24h",
-            "options": {
-                "temperature": 0.0,
-                "num_predict": 120
-            }
-        }
-        try:
-            r = requests.post(url, json=payload, timeout=1.0)
-            if r.status_code == 200:
-                data = r.json()
-                raw_resp = data.get("response", "").strip()
-                if raw_resp:
-                    lines = [l.strip() for l in raw_resp.split("\n") if l.strip()]
-                    score = None
-                    if lines:
-                        m = re.search(r'\b(10|\d(?:\.\d+)?)\b', lines[0])
-                        if m:
-                            try:
-                                score = float(m.group(1))
-                            except ValueError:
-                                pass
-                        if len(lines) > 1:
-                            reason = " ".join(lines[1:])
-                        else:
-                            reason = lines[0]
-                    else:
-                        m = re.search(r'\b(10|\d(?:\.\d+)?)\b', raw_resp)
-                        score = float(m.group(1)) if m else None
-                        reason = raw_resp
-
-                    if score is not None:
-                        score = max(0.0, min(10.0, round(score, 1)))
-                        return score, reason, raw_resp
-        except Exception:
-            pass
-
-        # Calibrated domain inference engine
-        cfg = CORRIDOR_CONFIG.get(corridor, CORRIDOR_CONFIG["Hormuz"])
-        base = cfg["baseline_risk"]
-        headline_lower = headline.lower()
-
-        reasons = []
-        if any(w in headline_lower for w in ["missile", "drone", "strike", "attack", "war", "kinetic"]):
-            base += 2.4
-            reasons.append(f"Kinetic strike threat and weapon deployment in {corridor} elevated tanker interdiction risk.")
-        elif any(w in headline_lower for w in ["seize", "seizure", "piracy", "boarding", "hijack", "somali"]):
-            base += 2.0
-            reasons.append(f"Hostile maritime boarding and commercial tanker seizure risk active across {corridor} transit lanes.")
-        elif any(w in headline_lower for w in ["military", "navy", "patrol", "drill", "warship", "fleet"]):
-            base += 1.3
-            reasons.append(f"Naval escalation and security force mobilizations increase operational friction in {corridor}.")
-        elif any(w in headline_lower for w in ["sanction", "tariff", "ofac", "shadow fleet", "price cap"]):
-            base += 1.5
-            reasons.append(f"Sanctions enforcement and regulatory trade restrictions tightening crude compliance on {corridor} routes.")
-        elif any(w in headline_lower for w in ["reroute", "bypass", "cape", "arctic", "delay", "bunkering"]):
-            base += 1.1
-            reasons.append(f"Commercial voyage diversions and route rerouting extending maritime transit lags for Indian crude imports.")
-        elif any(w in headline_lower for w in ["insurance", "war-risk", "premium", "freight"]):
-            base += 1.2
-            reasons.append(f"Surging maritime war-risk premiums and freight rates inflating landed crude transportation costs.")
-        else:
-            reasons.append(f"Geopolitical monitoring across {corridor} indicates steady crude flow with calibrated surveillance alert.")
-
-        score = max(0.5, min(9.8, round(base, 1)))
-        reason = reasons[0]
-        return score, reason, f"{score}\n{reason}"
-
     def _run_model_inference(self, headline: str, corridor: str, source: str) -> Dict[str, Any]:
         """
-        KrudeAi fine-tuned inference pipeline (C:\\models\\Krude).
-        Produces standardized output:
-        {"corridor": ..., "supplier": ..., "risk_score": 0-10, "reason": "...", "model_used": "..."}
+        Scores a headline with the KrudeAi model (keyword fallback if Ollama is down).
+        Output: {"corridor", "title", "supplier", "source", "risk_score", "reason", "model_used"}
         """
         headline_clean = headline.strip()
         headline_lower = headline_clean.lower()
-        
-        # Determine likely impacted supplier
         cfg = CORRIDOR_CONFIG.get(corridor, CORRIDOR_CONFIG["Hormuz"])
-        suppliers = cfg["primary_suppliers"]
-        supplier = suppliers[0]
-        for s in ["Saudi Arabia", "UAE", "Iraq", "USA", "Russia"]:
+
+        # Likely impacted supplier: named in the headline, else the corridor's main supplier
+        supplier = cfg["primary_suppliers"][0]
+        for s in ["Saudi Arabia", "UAE", "Iraq", "Kuwait", "Qatar", "Iran", "USA", "Russia"]:
             if s.lower() in headline_lower:
                 supplier = s
                 break
 
-        # Run real fine-tuned model inference
-        score, reason, raw_out = self._query_local_llama_model(headline_clean, corridor)
-
+        result = score_headline(headline_clean, cfg["baseline_risk"])
         return {
             "corridor": corridor,
             "title": headline_clean,
             "supplier": supplier,
             "source": source,
-            "risk_score": score,
-            "reason": reason,
-            "model_used": "KrudeAi Domain-Adapted Intelligence Model"
+            "risk_score": result["risk_score"],
+            "reason": result["reason"],
+            "model_used": result["engine"],
         }
 
     def evaluate_all_corridors(self, custom_disruptions: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
@@ -504,16 +425,17 @@ class RiskIntelligenceAgent:
                 "headline_source": top_headline.get("source"),
                 "affected_supplier": top_headline.get("supplier", cfg["primary_suppliers"][0]),
                 "reason": top_headline.get("reason", "Baseline maritime risk assessment."),
-                "model_engine": "KrudeAi Neural Engine",
-                "recent_headlines": corridor_headlines[:3] if corridor_headlines else [top_headline]
+                "model_engine": top_headline.get("model_used", "Corridor baseline (no headlines)"),
+                "recent_headlines": corridor_headlines[:3]
             })
 
         overall_risk = round(sum(r["risk_score"] * (r["volume_mbpd"] / 5.85) for r in results), 1)
+        engines = sorted({h.get("model_used", "") for h in headlines} - {""})
 
         return {
-            "component_label": "Real — live headlines scored by fine-tuned KrudeAi model",
-            "model_metadata": "KrudeAi Domain-Adapted Intelligence Model (Local CUDA Acceleration)",
-            "last_refresh_timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+            "component_label": "Live headlines (NewsAPI, GNews, GDELT) scored per headline",
+            "model_metadata": ", ".join(engines) or "No headlines scored yet",
+            "last_refresh_timestamp": self.get_feed_status()["last_updated"],
             "overall_risk_score": min(10.0, overall_risk),
             "corridors": results
         }

@@ -695,9 +695,10 @@
           <div class="modal-reason-box">
             <div class="mrb-header">
               <i class="fa-solid fa-brain"></i>
-              <span>KrudeAi Geopolitical Reasoning</span>
+              <span>Why this score</span>
             </div>
             <p class="mrb-text" id="modal-reason-text">Loading analysis...</p>
+            <p class="kpi-source-meta" id="modal-engine-text"></p>
           </div>
         </div>
       </div>
@@ -1168,8 +1169,8 @@
     <!-- ===================================================================== -->
     <section id="ai-model" class="section-container">
       <div class="section-header-block">
-        <h2 class="section-main-heading">KrudeAi Neural Architecture</h2>
-        <p class="section-sub-heading">Fine-tuned domain weights served locally via KrudeAi inference engine.</p>
+        <h2 class="section-main-heading">KrudeAi Model</h2>
+        <p class="section-sub-heading">Fine-tuned Llama 3.2 3B served locally by Ollama. If Ollama is down, a labelled keyword fallback scores headlines instead.</p>
       </div>
 
       <div class="model-grid-deck">
@@ -1178,10 +1179,11 @@
         <div class="model-story-card">
           <h3 class="msc-title">Training Provenance & Limitations</h3>
           <ul class="msc-list">
-            <li><strong>Model:</strong> KrudeAi Domain-Adapted Intelligence Model</li>
+            <li><strong>Model:</strong> Llama 3.2 3B Instruct + LoRA (Ollama model <code>Krude-risk</code>)</li>
+            <li><strong>Output:</strong> A 0&ndash;10 risk score only; the explanation shown with each score is rule-based</li>
             <li><strong>Dataset:</strong> 1,512 verified maritime headlines &rarr; 1,313 train / 199 holdout</li>
             <li><strong>Inference Input:</strong> Raw breaking news headline string (no corridor leak at inference)</li>
-            <li><strong>Serving Stack:</strong> High-throughput local runtime, q8_0 quantization, CUDA acceleration</li>
+            <li><strong>Serving Stack:</strong> Ollama (llama.cpp), F16 weights, CUDA 12 on the local GPU</li>
           </ul>
 
           <div class="model-limitation-box">

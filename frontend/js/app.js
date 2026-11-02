@@ -772,6 +772,7 @@ async function initHeadlineTicker() {
                     provider: h.provider || "",
                     url: h.url || "",
                     published_at: h.published_at || "",
+                    engine: h.model_used || "",
                     reason: h.reason || c.reason || "Model-calibrated maritime supply chain threat evaluation."
                   });
                 });
@@ -914,7 +915,12 @@ function openHeadlineModal(item) {
 
   const reasonEl = document.getElementById("modal-reason-text");
   if (reasonEl) {
-    reasonEl.textContent = item.reason || "Model calibrated geopolitical risk evaluation on strategic crude transit corridor.";
+    reasonEl.textContent = item.reason || "";
+  }
+
+  const engineEl = document.getElementById("modal-engine-text");
+  if (engineEl) {
+    engineEl.textContent = item.engine ? `Score by ${item.engine} · explanation is rule-based` : "";
   }
 
   modal.classList.add("active");
@@ -1920,49 +1926,21 @@ function initModelSandbox() {
 
     outScore.textContent = "...";
     outScore.className = "term-res-score text-amber";
-    outReason.textContent = "Evaluating headline with KrudeAi inference engine...";
+    outReason.textContent = "Scoring headline...";
 
-    const t0 = performance.now();
     try {
-      if (typeof API !== "undefined" && API.analyzeHeadline) {
-        const res = await API.analyzeHeadline(text, "Hormuz");
-        const t1 = performance.now();
-        const latency = Math.round(t1 - t0);
-
-        const scoreVal = typeof res.risk_score === "number" ? res.risk_score : parseFloat(res.risk_score || 7.0);
-        outScore.textContent = `${scoreVal.toFixed(1)} / 10.0`;
-        outScore.className = `term-res-score ${scoreVal >= 7.0 ? 'text-red' : (scoreVal >= 4.0 ? 'text-amber' : 'text-green')}`;
-        outLatency.textContent = `Latency: ~${res.latency_ms || latency}ms (KrudeAi Engine)`;
-        outReason.textContent = `Reasoning: ${res.reason || "Model calibrated geopolitical risk evaluation."}`;
-        return;
-      }
+      const res = await API.analyzeHeadline(text, null);
+      const scoreVal = res.risk_score;
+      outScore.textContent = `${scoreVal.toFixed(1)} / 10.0`;
+      outScore.className = `term-res-score ${scoreVal >= 7.0 ? 'text-red' : (scoreVal >= 4.0 ? 'text-amber' : 'text-green')}`;
+      outLatency.textContent = `Latency: ${res.latency_ms} ms · Scored by: ${res.engine}`;
+      outReason.textContent = `Why (${res.reason_engine}): ${res.reason}`;
     } catch (e) {
-      console.warn("API inference fallback:", e);
+      outScore.textContent = "—";
+      outScore.className = "term-res-score";
+      outLatency.textContent = "";
+      outReason.textContent = `Scoring failed: ${e.message}. Is the backend running?`;
     }
-
-    // Direct High-Accuracy Client Evaluation Fallback
-    const t1 = performance.now();
-    const latency = Math.round(t1 - t0 + 20);
-    const hLower = text.toLowerCase();
-
-    let scoreVal = 5.0;
-    let reasonText = "Monitored maritime corridor activity evaluated under standard security parameters.";
-
-    if (hLower.match(/(intercept|drone|missile|attack|strike|seize|houthi|irgc|torpedo|explosion|blockade|fire|hijack|warship|boarded)/)) {
-      scoreVal = 8.5;
-      reasonText = "Kinetic naval interdiction in strategic maritime corridor represents direct threat to commercial crude transit.";
-    } else if (hLower.match(/(drill|exercise|patrol|standoff|warning|sanctions|inspect|dispute|buildup|shadow fleet|escort)/)) {
-      scoreVal = 6.2;
-      reasonText = "Elevated military alert and enforcement posture detected in transit corridor.";
-    } else if (hLower.match(/(talks|peace|agreement|diplomatic|calm|routine|escort concluded|reopen|safely passed|ceasefire)/)) {
-      scoreVal = 2.1;
-      reasonText = "Diplomatic de-escalation and unhindered commercial maritime passage confirmed.";
-    }
-
-    outScore.textContent = `${scoreVal.toFixed(1)} / 10.0`;
-    outScore.className = `term-res-score ${scoreVal >= 7.0 ? 'text-red' : (scoreVal >= 4.0 ? 'text-amber' : 'text-green')}`;
-    outLatency.textContent = `Latency: ~${latency}ms (KrudeAi Fast Engine)`;
-    outReason.textContent = `Reasoning: ${reasonText}`;
   }
 }
 

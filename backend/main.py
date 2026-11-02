@@ -124,15 +124,10 @@ def get_system_overview():
         "project": "Krude",
         "version": "3.2.0",
         "database": db_summary,
-        "ai_model": {
-            "name": "KrudeAi",
-            "architecture": "KrudeAi Domain-Adapted Intelligence Model",
-            "weights_path": model_status.get("model_source_path"),
-            "hardware": model_status.get("acceleration_device"),
-            "status": "Online (CUDA Acceleration)"
-        },
+        "ai_model": model_status,
         "truth_table": [
-            {"component": "Risk score & Geopolitical reasoning", "status": "Real — live headlines through fine-tuned KrudeAi inference engine"},
+            {"component": "Headline risk score", "status": f"Real — live headlines scored by {model_status['active_engine']}"},
+            {"component": "Headline explanation", "status": "Rule-based — the model outputs a score only"},
             {"component": "Maritime routes & distances", "status": "Real — searoute marine network graph + geometric chokepoint detection"},
             {"component": "Crude quality penalty", "status": "Real — API/Sulphur yield and hydrotreating penalty against 32 API / 2% S Indian baseline"},
             {"component": "Procurement ranking & allocation", "status": "Real — live optimization against DuckDB/SQLite dataset"},
@@ -151,26 +146,16 @@ def get_system_overview():
 
 @app.get("/api/model/status")
 def get_model_status():
-    """Returns current active model engine, device, and model weights metadata."""
+    """Returns whether Ollama is up, the model is installed, and whether it is loaded on GPU or CPU."""
     return model_manager.get_status()
 
 @app.post("/api/model/analyze")
 def analyze_headline(req: HeadlineAnalysisRequest):
     """
-    Evaluates arbitrary geopolitical/maritime headlines using fine-tuned KrudeAi.
-    Outputs calibrated Risk Score (0-10), Geopolitical Reasoning, and inference latency.
+    Scores an arbitrary headline 0-10 with the fine-tuned KrudeAi model (keyword fallback if
+    Ollama is down). Returns score, engine used, rule-based explanation and latency.
     """
     return model_manager.analyze_headline(headline=req.headline, corridor=req.corridor)
-
-@app.post("/api/model/set-backend")
-def set_model_backend(req: Dict[str, Any]):
-    """Hot-swaps active AI model backend."""
-    return model_manager.set_backend(
-        mode=req.get("mode", "OLLAMA"),
-        model_name=req.get("model_name"),
-        api_url=req.get("api_url"),
-        api_key=req.get("api_key")
-    )
 
 @app.post("/api/model/export-dataset")
 def export_training_dataset():

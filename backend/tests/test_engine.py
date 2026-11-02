@@ -172,23 +172,31 @@ class TestKrudeDigitalTwin(unittest.TestCase):
             plot_path.unlink()
 
     def test_llama_model_manager_and_status(self):
-        """Validates AIModelManager configuration, model status, and headline analysis."""
+        """Model status reflects reality and every score names the engine that produced it."""
         from engine.fine_tuning_adapter import AIModelManager
-        models_dir = backend_dir / "models"
-        mgr = AIModelManager(self.data_dir, models_dir)
+        from engine.scoring import ENGINE_LLM, ENGINE_KEYWORD
+        mgr = AIModelManager(self.data_dir, backend_dir / "models")
         status = mgr.get_status()
-        
-        self.assertEqual(status["active_backend"], "OLLAMA")
-        self.assertEqual(status["model_name"], "KrudeAi")
-        self.assertEqual(status["model_source_path"], r"C:\models\Krude")
-        self.assertEqual(status["acceleration_device"], "CUDA Accelerated Engine")
-        
-        # Test analysis output schema
+        self.assertIn(status["device"], ["GPU", "CPU", "not loaded"])
+        self.assertIsInstance(status["ollama_online"], bool)
+
         res = mgr.analyze_headline("IRGC forces seize foreign tanker in Strait of Hormuz")
-        self.assertIn("risk_score", res)
-        self.assertIn("reason", res)
+        self.assertIn(res["engine"], [ENGINE_LLM, ENGINE_KEYWORD])
+        self.assertEqual(res["reason_engine"], "rule-based")
         self.assertGreaterEqual(res["risk_score"], 0.0)
         self.assertLessEqual(res["risk_score"], 10.0)
+
+    def test_keyword_fallback_is_labelled_when_ollama_down(self):
+        """With Ollama unreachable, scores come from the keyword engine and say so."""
+        import os
+        from unittest import mock
+        from engine import scoring
+        with mock.patch.dict(os.environ, {"OLLAMA_HOST": "http://127.0.0.1:9"}), \
+             mock.patch.object(scoring, "_llm_unavailable_until", 0.0):
+            attack = scoring.score_headline("Houthi missile strikes tanker in Red Sea", baseline=5.0)
+            calm = scoring.score_headline("Ceasefire talks ease shipping fears", baseline=5.0)
+        self.assertEqual(attack["engine"], scoring.ENGINE_KEYWORD)
+        self.assertGreater(attack["risk_score"], calm["risk_score"])
 
     def test_block4_scenario_engine(self):
         """Validates Block 4 run_scenario CLI engine outputs."""

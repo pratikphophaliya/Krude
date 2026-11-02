@@ -2,218 +2,51 @@ import json
 import os
 import requests
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
+
+try:
+    from engine.scoring import score_headline, llm_status
+    from engine.risk_intel import CORRIDOR_CONFIG
+except ImportError:
+    from backend.engine.scoring import score_headline, llm_status
+    from backend.engine.risk_intel import CORRIDOR_CONFIG
+
 
 class AIModelManager:
-    r"""
-    Modular AI Model Adapter & Fine-Tuning Manager.
-    Primary Backend: KrudeAi Domain-Adapted Model running with CUDA acceleration.
-    Supports seamless hot-swapping between:
-      1. Ollama Local LLM (Krude-risk from C:\models\Krude) [PRIMARY DEFAULT]
-      2. Built-in Heuristic Expert Engine (Immediate, offline fallback)
-      3. HuggingFace / PyTorch Local Weights (.safetensors / transformers)
-      4. OpenAI / Gemini Compatible API Endpoint
+    """
+    KrudeAi model status, ad-hoc headline scoring and fine-tuning dataset export.
+    Scoring itself lives in engine.scoring (fine-tuned Ollama model, keyword fallback).
     """
     def __init__(self, data_dir: Path, models_dir: Path):
         self.data_dir = data_dir
         self.models_dir = models_dir
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Default active backend: KrudeAi
-        self.backend_mode = "OLLAMA"
-        self.model_name = "KrudeAi"
-        self.model_path = r"C:\models\Krude"
-        self.api_base_url = "http://localhost:11434"
-        self.api_key = os.getenv("AI_API_KEY", "")
-        self.gpu_device = "CUDA Accelerated Engine"
-        self.custom_model_loaded = True
-
-    def set_backend(
-        self,
-        mode: str,
-        model_name: Optional[str] = None,
-        api_url: Optional[str] = None,
-        api_key: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Switch the active AI model backend."""
-        mode = mode.upper()
-        if mode not in ["HEURISTIC", "OLLAMA", "CUSTOM_PYTORCH", "API_ENDPOINT"]:
-            raise ValueError(f"Unsupported backend mode: {mode}")
-
-        self.backend_mode = mode
-        if model_name:
-            self.model_name = model_name
-        if api_url:
-            self.api_base_url = api_url
-        if api_key:
-            self.api_key = api_key
-
-        return {
-            "status": "SUCCESS",
-            "active_backend": self.backend_mode,
-            "model_name": self.model_name,
-            "model_path": self.model_path,
-            "api_url": self.api_base_url
-        }
 
     def get_status(self) -> Dict[str, Any]:
-        """Returns the current AI backend status and available options."""
-        # Verify Ollama connectivity
-        ollama_online = False
-        loaded_models = []
-        try:
-            r = requests.get(f"{self.api_base_url}/api/tags", timeout=2)
-            if r.status_code == 200:
-                ollama_online = True
-                loaded_models = [m.get("name", "") for m in r.json().get("models", [])]
-        except Exception:
-            pass
-
+        """Live Ollama/model status, including whether the model is currently loaded on GPU or CPU."""
+        status = llm_status()
+        device = "not loaded"
+        if status["ollama_online"]:
+            try:
+                host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+                for m in requests.get(f"{host}/api/ps", timeout=2).json().get("models", []):
+                    if m.get("name", "").split(":")[0] == status["model"].split(":")[0]:
+                        device = "GPU" if m.get("size_vram", 0) > 0 else "CPU"
+            except Exception:
+                pass
         return {
-            "active_backend": self.backend_mode,
-            "model_name": self.model_name,
-            "model_architecture": "Llama 3.2 3B Instruct + LoRA",
-            "model_source_path": self.model_path,
-            "acceleration_device": self.gpu_device,
-            "api_base_url": self.api_base_url,
-            "engine_online": ollama_online,
-            "available_ollama_models": loaded_models,
-            "custom_weights_directory": str(self.models_dir),
-            "supported_backends": [
-                {
-                    "id": "OLLAMA",
-                    "name": "Llama 3.2 3B + LoRA (Krude-risk)",
-                    "description": f"Local fine-tuned weights from {self.model_path} on {self.gpu_device} (Default)",
-                    "active": self.backend_mode == "OLLAMA"
-                },
-                {
-                    "id": "HEURISTIC",
-                    "name": "Deterministic Fallback Engine",
-                    "description": "Domain rules & heuristics (Zero GPU latency fallback)",
-                    "active": self.backend_mode == "HEURISTIC"
-                },
-                {
-                    "id": "CUSTOM_PYTORCH",
-                    "name": "Direct PyTorch SafeTensors",
-                    "description": "Loads weights via PyTorch / HuggingFace Transformers",
-                    "active": self.backend_mode == "CUSTOM_PYTORCH"
-                },
-                {
-                    "id": "API_ENDPOINT",
-                    "name": "Cloud / OpenAI-Compatible API",
-                    "description": "Connects to remote vLLM or cloud API service",
-                    "active": self.backend_mode == "API_ENDPOINT"
-                }
-            ]
+            "model_name": status["model"],
+            "model_architecture": "Llama 3.2 3B Instruct + LoRA (served by Ollama)",
+            "ollama_online": status["ollama_online"],
+            "model_installed": status["model_installed"],
+            "device": device,
+            "active_engine": "KrudeAi fine-tuned model" if status["model_installed"] else "Keyword fallback",
         }
 
     def analyze_headline(self, headline: str, corridor: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Direct high-performance inference for arbitrary headlines using KrudeAi model.
-        Returns parsed score, reasoning, token metrics, and latency.
-        """
-        import time
-        import re
-        t0 = time.time()
-        
-        prompt = headline.strip()
-        url = f"{self.api_base_url}/api/generate"
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": False,
-            "keep_alive": "24h",
-            "options": {
-                "temperature": 0.0,
-                "num_predict": 120
-            }
-        }
-        
-        try:
-            res = requests.post(url, json=payload, timeout=0.35)
-            t1 = time.time()
-            latency_ms = round((t1 - t0) * 1000, 1)
-            
-            if res.status_code == 200:
-                data = res.json()
-                raw_text = data.get("response", "").strip()
-                lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
-                score = 5.0
-                if lines:
-                    m = re.search(r'\b(10|\d(?:\.\d+)?)\b', lines[0])
-                    if m:
-                        try:
-                            score = float(m.group(1))
-                        except ValueError:
-                            pass
-                    if len(lines) > 1:
-                        reason = " ".join(lines[1:])
-                    else:
-                        reason = lines[0]
-                else:
-                    m = re.search(r'\b(10|\d(?:\.\d+)?)\b', raw_text)
-                    if m:
-                        score = float(m.group(1))
-                    reason = raw_text
-                
-                score = max(0.0, min(10.0, round(score, 1)))
-                
-                return {
-                    "status": "SUCCESS",
-                    "headline": headline,
-                    "risk_score": score,
-                    "reason": reason,
-                    "raw_output": raw_text,
-                    "model": "KrudeAi",
-                    "device": self.gpu_device,
-                    "latency_ms": latency_ms,
-                    "eval_duration_ms": round(data.get("eval_duration", 0) / 1e6, 1) if "eval_duration" in data else None
-                }
-        except Exception:
-            pass
-
-        # Fast Semantic Assessment Fallback (<10ms)
-        t1 = time.time()
-        latency_ms = round((t1 - t0) * 1000 + 15, 1)
-        h_lower = headline.lower()
-        
-        # High Kinetic Threats
-        if any(w in h_lower for w in ["intercept", "drone", "missile", "attack", "strike", "seize", "houthi", "irgc", "torpedo", "explosion", "blockade", "fire", "hijack", "warship", "boarded"]):
-            score = 8.5
-            reason = "Kinetic naval interdiction in strategic maritime corridor represents direct threat to commercial crude transit."
-        elif any(w in h_lower for w in ["drill", "exercise", "patrol", "standoff", "warning", "sanctions", "inspect", "dispute", "buildup", "shadow fleet", "escort"]):
-            score = 6.2
-            reason = "Elevated military alert and enforcement posture detected in transit corridor."
-        elif any(w in h_lower for w in ["talks", "peace", "agreement", "diplomatic", "calm", "routine", "escort concluded", "reopen", "safely passed", "ceasefire"]):
-            score = 2.1
-            reason = "Diplomatic de-escalation and unhindered commercial maritime passage confirmed."
-        else:
-            score = 5.0
-            reason = "Monitored maritime corridor activity evaluated under standard security parameters."
-
-        return {
-            "status": "FAST_INFERENCE",
-            "headline": headline,
-            "risk_score": score,
-            "reason": reason,
-            "raw_output": "",
-            "model": "KrudeAi",
-            "device": self.gpu_device,
-            "latency_ms": latency_ms
-        }
-
-    def generate_strategic_brief(self, scenario_data: Dict[str, Any], procurement_data: Dict[str, Any]) -> str:
-        """
-        Generates an executive briefing narrative using the active AI model backend.
-        """
-        if self.backend_mode == "OLLAMA":
-            return self._query_ollama(scenario_data, procurement_data)
-        elif self.backend_mode == "API_ENDPOINT":
-            return self._query_api(scenario_data, procurement_data)
-        elif self.backend_mode == "CUSTOM_PYTORCH":
-            return self._query_custom_pytorch(scenario_data, procurement_data)
-        else:
-            return self._generate_heuristic_narrative(scenario_data, procurement_data)
+        """Scores an arbitrary headline; the result says which engine produced the score."""
+        baseline = CORRIDOR_CONFIG.get(corridor, {}).get("baseline_risk", 5.0) if corridor else 5.0
+        return {"headline": headline, **score_headline(headline.strip(), baseline)}
 
     def _generate_heuristic_narrative(self, scenario: Dict[str, Any], procurement: Dict[str, Any]) -> str:
         """Built-in high precision strategic brief generation."""
@@ -246,47 +79,6 @@ class AIModelManager:
             f"- **Strategic SPR Drawdown:** Trigger calibrated underground cavern discharge from Mangalore and Padur to safeguard coastal refiners from dry-run shutdowns."
         )
         return narrative
-
-    def _query_ollama(self, scenario: Dict[str, Any], procurement: Dict[str, Any]) -> str:
-        """Queries local Ollama endpoint."""
-        prompt = f"You are an expert Chief Energy Security Strategist for India. Analyze this crude disruption scenario:\nScenario: {json.dumps(scenario)}\nProcurement: {json.dumps(procurement)}\nGenerate an actionable executive decision brief."
-        try:
-            res = requests.post(
-                f"{self.api_base_url}/api/generate",
-                json={"model": self.model_name, "prompt": prompt, "stream": False},
-                timeout=12
-            )
-            if res.status_code == 200:
-                return res.json().get("response", "No response received from Ollama model.")
-            return f"[Ollama Error: Status {res.status_code}] Falling back to heuristic engine.\n\n" + self._generate_heuristic_narrative(scenario, procurement)
-        except Exception as e:
-            return f"[Ollama Connection Failed: {str(e)}] Using built-in intelligence engine:\n\n" + self._generate_heuristic_narrative(scenario, procurement)
-
-    def _query_api(self, scenario: Dict[str, Any], procurement: Dict[str, Any]) -> str:
-        """Queries OpenAI/vLLM compatible API."""
-        prompt = f"Analyze India oil supply disruption and recommend procurement rerouting:\nScenario: {json.dumps(scenario)}"
-        try:
-            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-            res = requests.post(
-                f"{self.api_base_url}/v1/chat/completions",
-                headers=headers,
-                json={
-                    "model": self.model_name,
-                    "messages": [{"role": "system", "content": "You are an energy security AI."}, {"role": "user", "content": prompt}],
-                    "max_tokens": 800
-                },
-                timeout=15
-            )
-            if res.status_code == 200:
-                return res.json()["choices"][0]["message"]["content"]
-            return f"[API Error {res.status_code}] Falling back to built-in engine.\n\n" + self._generate_heuristic_narrative(scenario, procurement)
-        except Exception as e:
-            return f"[API Connection Failed: {str(e)}] Using built-in intelligence engine:\n\n" + self._generate_heuristic_narrative(scenario, procurement)
-
-    def _query_custom_pytorch(self, scenario: Dict[str, Any], procurement: Dict[str, Any]) -> str:
-        """Simulates/runs loaded PyTorch / HuggingFace local pipeline."""
-        # When user drops custom weights, they can initialize standard transformers pipeline here
-        return f"[Active: Local Custom Model '{self.model_name}']\n\n" + self._generate_heuristic_narrative(scenario, procurement)
 
     def export_fine_tuning_dataset(self, output_path: Optional[Path] = None) -> Dict[str, Any]:
         """
