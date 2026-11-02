@@ -231,7 +231,7 @@ function initPreloader() {
    3. HERO STATS COUNT-UP ANIMATION
    ============================================================================== */
 function initHeroStats() {
-  const statElements = document.querySelectorAll(".stat-num");
+  const statElements = document.querySelectorAll(".stat-num[data-target]:not([data-target='0'])");
 
   setTimeout(() => {
     statElements.forEach(el => {
@@ -356,6 +356,8 @@ function initProblemCoastalMap() {
       setText("story-import-share", `${importShare.toFixed(1)}%`);
       setText("story-import-mbpd", (total / 1000).toFixed(2));
       setText("story-import-kbd", fmt(total));
+      setText("hero-import-share", `${importShare.toFixed(0)}%`);
+      setText("hero-hormuz-share", `${c.hormuz.share_of_india_imports_pct.toFixed(0)}%`);
 
       // Bab-el-Mandeb also carries the Suez barrels, so rank the four map corridors by their own volume
       const ranked = ["hormuz", "bab_el_mandeb", "malacca", "cape_of_good_hope"].sort((a, b) => c[b].volume_at_risk_kbd - c[a].volume_at_risk_kbd);

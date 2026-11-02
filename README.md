@@ -1,286 +1,174 @@
-# Krude: Sovereign Energy Supply Chain & Maritime Geopolitical Risk Digital Twin
+# Krude: India Crude Supply Chain Risk Digital Twin
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?style=flat&logo=python)](https://www.python.org/)
-[![DuckDB](https://img.shields.io/badge/DuckDB-1.0+-FFF000.svg?style=flat&logo=duckdb)](https://duckdb.org/)
-[![NetworkX](https://img.shields.io/badge/NetworkX-3.0+-blue.svg?style=flat)](https://networkx.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Krude watches the five sea corridors India's crude imports pass through, turns live news into a
+30-day disruption probability per corridor and per supplier, and lets an analyst play out a
+disruption: what it does to India's supply, Brent, the import bill, which suppliers to switch to,
+and how to release the Strategic Petroleum Reserve.
 
-> **Empirical decision-support platform and geospatial digital twin that continuously monitors global maritime chokepoints, models kinetic supply disruption shocks, quantifies macroeconomic transmission into India's fiscal balance, and autonomously orchestrates optimal crude procurement rerouting and Strategic Petroleum Reserve (ISPRL) drawdowns.**
-
----
-
-##  1. Executive Summary & The Problem Solved
-
-India is the world's 3rd largest consumer of crude oil, consuming approximately **5.4 Million Barrels per Day (MBPD)** with a staggering **88% net import dependency**. 
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       INDIA'S ENERGY SECURITY VULNERABILITY                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  • 88% Net Crude Import Dependency (~4.75 MBPD Imported)                    │
-│  • 40–45% of total crude imports transit the narrow Strait of Hormuz        │
-│  • Secondary maritime choke exposure at Bab-el-Mandeb & Malacca             │
-│  • Total Strategic Petroleum Reserve (ISPRL) cover is ~9.5 days (~39 MMBBL) │
-│  • Every +$10/bbl crude spike adds ~$14.2B to annual import bill & +54 bps  │
-│    Current Account Deficit (CAD) widening                                   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### The Problem
-Traditional energy security risk monitoring operates in fragmented silos:
-1. **Geopolitical risk tracking** relies on delayed news summaries without quantitative impact models.
-2. **Maritime logistics** lack dynamic landed-cost optimization that factors in war-risk insurance, freight surcharges, and searoute transit delays (e.g. +14 to +17 days via the Cape of Good Hope).
-3. **Refinery compatibility constraints** (API gravity, sulfur limits, Nelson complexity) are rarely paired with real-time supplier availability.
-4. **Strategic Petroleum Reserve (SPR) cavern releases** lack risk-calibrated optimization models to prevent premature exhaustion during prolonged maritime interdictions.
-
-### The Solution: Krude Digital Twin
-**Krude** unifies real-time intelligence ingestion, fine-tuned neural reasoning, linear programming (LP) optimization, macroeconomic waterfall simulation, and multi-cavern SPR management into a single, high-performance digital twin.
+Built for the hackathon brief *Supply Chain Intelligence, Energy Security & Geopolitical Risk*.
 
 ---
 
-##  2. High-Level System Architecture
+## What is live, what is modelled
 
-```
-                                  LIVE GLOBAL DATA FEEDS
-                    ┌─────────────────────────────────────────────────┐
-                    │ GDELT 2.0 • NewsAPI • Vortexa AIS • PPAC India  │
-                    └───────────────────────┬─────────────────────────┘
-                                            │
-                                            ▼
-                    ┌─────────────────────────────────────────────────┐
-                    │   LIVE INTELLIGENCE & SENTIMENT INGESTION       │
-                    │   • Parallel corridor multi-threading (NewsAPI) │
-                    │   • Background Stale-While-Revalidate caching   │
-                    │   • Multi-lingual maritime keyword extraction   │
-                    └───────────────────────┬─────────────────────────┘
-                                            │
-                                            ▼
-                    ┌─────────────────────────────────────────────────┐
-                    │         KRUDEAI NEURAL REASONING ENGINE         │
-                    │   • Fine-Tuned Llama-3 / Mistral (Local Ollama) │
-                    │   • 5-Stage Risk Pipeline: Dedupe → Time Decay  │
-                    │     → Noisy-OR Aggregation → Momentum → Alerts  │
-                    │   • Ultra-fast heuristic fallback (<25ms)       │
-                    └───────────────────────┬─────────────────────────┘
-                                            │
-                                            ▼
-                    ┌─────────────────────────────────────────────────┐
-                    │    MACROECONOMIC DISRUPTION TRANSMISSION        │
-                    │   • Physical Barrel Deficit Calculator          │
-                    │   • Freight & War-Risk Surcharge Models         │
-                    │   • GDP Headwinds & CAD Multipliers (DuckDB)    │
-                    └───────┬─────────────────────────────────┬───────┘
-                            │                                 │
-            ┌───────────────┴──────────────┐   ┌──────────────┴──────────────┐
-            ▼                              ▼   ▼                             ▼
-┌───────────────────────────────┐   ┌────────────────────────────────────────┐
-│ ADAPTIVE PROCUREMENT ENGINE   │   │  STRATEGIC PETROLEUM RESERVE (ISPRL)   │
-│ • Landed Cost Optimizer (PuLP)│   │  • Multi-Cavern Allocation (Visakh,    │
-│ • API & Sulfur Blending       │   │    Mangalore, Padur)                   │
-│ • 8 Strategic Bypass Routes   │   │  • Dynamic Risk-Synced Drawdown        │
-└───────────────┬───────────────┘   └─────────────────┬──────────────────────┘
-                │                                     │
-                └──────────────────┬──────────────────┘
-                                   │
-                                   ▼
-                    ┌─────────────────────────────────────────────────┐
-                    │  MARITIME SUPPLY CHAIN DIGITAL TWIN DASHBOARD   │
-                    │  • Interactive NetworkX Curved Oceanic Routes   │
-                    │  • Isolated Chokepoint Interdiction Waves       │
-                    │  • Ultra-Responsive Glassmorphic UI (Vanilla JS)│
-                    └─────────────────────────────────────────────────┘
-```
+| Part | Data | Status |
+|---|---|---|
+| Headlines | NewsAPI, GNews, GDELT DOC 2.0, refreshed every 15 min | Live |
+| Headline score (0-10) | Fine-tuned Llama 3.2 3B (`Krude-risk`) on Ollama; keyword fallback if Ollama is down | Live, each score names its engine |
+| Corridor probability | Stored headlines → dedupe → 7-day half-life decay → strongest event + damped corroboration → momentum → sanctions → calibrated P(30 days) | Computed |
+| Brent, USD/INR | FRED (`DCOILBRENTEU`, `DEXINUS`), Yahoo `BZ=F` for the latest Brent | Live |
+| India's imports by supplier | `imports_wide.csv`, monthly Apr-2024 to Jul-2026 | Static file, see Data sources |
+| Routes, distances, freight | `routes_expanded.csv` (59 routes, searoute distances) | Static file |
+| Sanctions | `ofac.csv`, OFAC SDN snapshot | Static file |
+| Scenario, procurement, reserve | Rule-of-thumb macro model and two linear programs (PuLP/CBC) | Modelled; constants in `assumptions.yaml` |
+
+Not included: AIS ship tracking and live freight or war-risk rates.
 
 ---
 
-##  3. Key Modules & Features
+## Modules
 
-### 1.  Corridor Threat Board & Intelligence Feed
-* **Corridors Monitored**: Strait of Hormuz, Bab-el-Mandeb, Suez Canal, Malacca Strait, Cape of Good Hope.
-* **Non-Blocking Background Caching**: Response times optimized down to **`<25 ms`** using background pre-fetching and thread pooling.
-* **Corridor-Specific Threat Score ($0 - 10$)**: Normalized risk scores calculated using Noisy-OR aggregation and exponential time decay ($\lambda = 0.05/\text{day}$).
+**1. Supply-disruption probability** (`/api/risk/supply-disruption-probabilities`)
+- Per corridor: P(disruption within 30 days) from the stored live headlines, plus 7-day momentum.
+- Per supplier: the supplier's 3-month imports are split across its routes by capacity. Each route's risk is `1 − Π(1 − P(chokepoint))`, and the supplier's risk is the volume-weighted average. Russia and Venezuela get ×1.15 for OFAC sanctions programmes.
 
-### 2.  KrudeAi Neural Inference Sandbox (`/api/model/analyze`)
-* Evaluates arbitrary maritime news headlines and returns quantitative threat scores ($0 - 10$), corridor-specific geopolitical reasoning, and token latency.
-* Dual-mode architecture: Runs against fine-tuned local weights via Ollama or executes instantly via high-speed semantic fallback ($<25\text{ms}$).
+**2. Corridor Threat Board** (`/api/risk/threat-board`)
+- Shows the live index (0-10) per corridor with a 30-day history, and each pipeline stage's value.
+- The sliders run a what-if on those stages, using the same formulas as the backend.
 
-### 3.  Disruption Scenario Simulator & Macro Transmission Waterfall
-* Simulates custom interdiction scenarios across any corridor (e.g. 80% Hormuz closure for 45 days).
-* **Quantified Outputs**:
-  - Physical supply deficit ($\text{MBPD}$).
-  - Cape of Good Hope rerouting delay ($+14\text{ to }+17\text{ days}$).
-  - Landed crude cost surge ($\Delta \$/\text{bbl}$).
-  - India import bill addition ($\$ \text{Billion}$).
-  - Macroeconomic impact: Real GDP growth headwind ($\Delta \text{pp}$) and CAD widening ($\text{bps}$).
+**3. Disruption Scenario Modeller** (`/api/scenario/simulate`)
+- India's gap = severity × barrels behind the chokepoint. Reroutable corridors (Red Sea, Suez, Malacca) only lose the extra voyage days; Hormuz has no sea reroute.
+- Brent rise = live Brent × (global supply lost / 102.8 MBPD) / short-run elasticity 0.2.
+- Outputs: import bill, ₹/litre, refinery run cut, GDP and current-account deficit (CAD) effects scaled by duration.
 
-### 4.  Adaptive Procurement Orchestrator
-* Evaluates and dynamically ranks alternative supply corridors to replace interdicted Persian Gulf crude:
-  1. **Brazil (Santos Basin / Tupi FPSO)** — Cape of Good Hope ($71.15/\text{bbl}$, 28d transit, $+340\text{ kbd}$)
-  2. **UAE (Fujairah Deepwater Hub)** — ADCOP Pipeline Hormuz Bypass ($74.20/\text{bbl}$, 4d transit, $+500\text{ kbd}$)
-  3. **Oman (Duqm / Mina Al Fahal)** — Direct Arabian Sea Bypass ($73.10/\text{bbl}$, 7d transit, $+260\text{ kbd}$)
-  4. **Saudi Arabia (Yanbu Red Sea Terminal)** — Petroline Pipeline Bypass ($72.80/\text{bbl}$, 12d transit, $+450\text{ kbd}$)
-  5. **Nigeria (Bonny Offshore Terminal)** — Atlantic Sweet ($73.80/\text{bbl}$, 25d transit, $+280\text{ kbd}$)
-  6. **USA (Corpus Christi / LOOP)** — WTI Midland via Cape ($74.51/\text{bbl}$, 38d transit, $+300\text{ kbd}$)
-  7. **Russia (Kozmino Pacific Port)** — ESPO Blend via Malacca ($76.40/\text{bbl}$, 18d transit, $+350\text{ kbd}$)
-  8. **Iraq (Ceyhan Mediterranean Hub)** — Kirkuk-Ceyhan Pipeline Bypass ($75.90/\text{bbl}$, 24d transit, $+220\text{ kbd}$)
+**4. Adaptive Procurement Orchestrator** (`/api/procurement/rank`, `/api/procurement/optimize`)
+- Risk-adjusted cost = landed cost + P(route disrupted) × $40/bbl.
+- A linear program allocates a supply gap across suppliers, with per-country and per-route caps and blocked chokepoints.
 
-### 5.  Strategic Petroleum Reserve (ISPRL) Drawdown Optimizer
-* Manages India's **39.28 MMBBL (5.33 MMT)** underground rock caverns across 3 strategic locations:
-  - **Visakhapatnam (Andhra Pradesh)**: $1.33\text{ MMT}$ ($9.77\text{ MMBBL}$)
-  - **Mangalore (Karnataka)**: $1.50\text{ MMT}$ ($11.00\text{ MMBBL}$)
-  - **Padur (Karnataka)**: $2.50\text{ MMT}$ ($18.51\text{ MMBBL}$)
-* **Interactive Drawdown Policies**:
-  - **Steady Linear Release** ($180\text{ kbd}$ · 52-day coverage).
-  - **Aggressive Price Arrest** ($350\text{ kbd}$ · 28-day coverage).
-  - **Hold & Conserve** ($65\text{ kbd}$ · 140+ day coverage).
-  - **Sync Risk Scores**: Dynamically calculates optimal drawdown rate based on active real-time corridor threat scores.
+**5. Strategic Reserve Optimiser** (`/api/reserve/optimize-lp`, `/api/reserve/policies`)
+- A linear program schedules the daily release against the scenario's gap forecast. It minimises unserved barrels (valued at $200/bbl) plus the cost of drawing ($18/bbl).
+- It keeps an adaptive floor: floor days + P(follow-on disruption) × 6.4 MMbbl.
+- Reserve: ISPRL Phase I, 5.33 MMT ≈ 39.47 MMbbl ≈ 9.5 days (Visakhapatnam 9.77, Mangalore 11.00, Padur 18.70 MMbbl).
 
-### 6.  Maritime Supply Chain Digital Twin
-* World-scale NetworkX maritime route graph rendered with smooth quadratic bezier curved paths across ocean basins.
-* **Corridor-Isolated Interdiction**: Triggering a cascade on a chokepoint specifically highlights only the affected maritime lanes and discharge ports in pulsing alert red, leaving unaffected lanes calm.
+**6. Supply Chain Digital Twin** (`/api/digital-twin/graph`, `/api/digital-twin/state`)
+- The map draws load ports → chokepoints → Indian discharge ports. Line width is the 3-month average flow.
+- Trigger Cascade runs the scenario, procurement and reserve models for the chosen corridor, and reports the barrels lost per port and the recommended action.
+
+**7. Empirical check** (`/api/risk/empirical-validation`)
+- Tests whether GDELT coverage of a corridor led Brent moves since 2024. It reports level and lead-lag correlations and an event study around coverage spikes.
+- The verdict is computed from the data, not written in advance.
 
 ---
 
-##  4. Mathematical Formulations & Optimization Models
+## Data sources
 
-### A. Multi-Criteria Supplier Optimization Score
-$$S_i = 0.4 \cdot \tilde{C}_i + 0.3 \cdot \left(\frac{R_c}{10}\right) + 0.2 \cdot \tilde{T}_i + 0.1 \cdot (1 - \tilde{K}_i)$$
+| File | Contents | Source |
+|---|---|---|
+| `backend/data/imports_wide.csv` | India's crude imports by supplier, thousand barrels/month | Matches Kpler tanker-tracking figures reported in the press (e.g. Russia 2.80 MBPD in Jul-2026; Iraq 0 in Apr-2026). The original export is not recorded. |
+| `backend/data/routes_expanded.csv` | Load port, discharge port, chokepoints, distance, transit days, freight, capacity | `build_routes.py` (searoute) |
+| `backend/data/suppliers.csv` | Grades, API gravity, sulphur, FOB, liftable volume | `build_suppliers.py` |
+| `backend/data/ofac.csv` | OFAC SDN entities (Iran, Russia, Venezuela programmes) | `build_ofac_real.py` |
+| `backend/data/ports.csv` | Port and chokepoint coordinates for the map | Public port locations |
+| `backend/data/spr_facilities.csv` | ISPRL caverns | ISPRL |
+| `backend/data/assumptions.yaml` | Every model constant, with its source | Hand-curated |
 
-Where:
-* $\tilde{C}_i$: Min-max normalized landed cost ($\$/\text{bbl}$).
-* $R_c$: Active threat score of the transit corridor ($0 - 10$).
-* $\tilde{T}_i$: Min-max normalized searoute transit duration (days).
-* $\tilde{K}_i$: Min-max normalized spare production capacity ($\text{MBPD}$).
-* *Optimization Objective*: $\min S_i$ (Lower composite score = higher procurement priority).
-
-### B. Total Landed Crude Cost Model
-$$C_{\text{landed}} = C_{\text{FOB}} + F_{\text{base}} \cdot \left(1 + \frac{D_{\text{transit}}}{25}\right) + \text{Ins}_{\text{war}}(R_c) + \text{Demurrage}_{\text{choke}}$$
-
-### C. Noisy-OR Threat Aggregation with Exponential Decay
-$$P(\text{Disruption} \mid \text{Corridor } c) = 1 - \prod_{j=1}^{N} \left(1 - P(E_j) \cdot e^{-\lambda(t - t_j)}\right)$$
-
-Where $\lambda = 0.05/\text{day}$, giving older events a natural half-life decay of $\approx 13.8\text{ days}$.
+Downloaded at runtime and git-ignored: headline history, Brent and USD/INR history, GDELT coverage timelines.
 
 ---
 
-##  5. Technology Stack
+## Setup
 
-### Backend
-* **Language**: Python 3.10+
-* **Framework**: FastAPI (Asynchronous ASGI REST API)
-* **Server**: Uvicorn
-* **Database & Analytics**: DuckDB (Embedded OLAP engine), SQLite
-* **Graph Algorithms**: NetworkX
-* **Mathematical Optimization**: PuLP (Linear Programming CBC solver)
-* **Machine Learning / LLM**: Fine-tuned Llama-3/Mistral instruction adapter via Ollama / HuggingFace Transformers
+Requires Python 3.11+. Ollama is optional.
 
-### Frontend
-* **Core**: HTML5, Vanilla JavaScript (ES6+), Vanilla CSS (Custom Nixtio Dark Design System)
-* **Visualizations**: Chart.js 4.4, Dynamic Scalable SVG vector canvases
-* **Styling**: Glassmorphism, CSS Custom Properties, Responsive CSS Grid, Smooth Staggered Scroll Transitions (IntersectionObserver)
-* **Icons & Fonts**: FontAwesome 6, Google Fonts (Syne, Plus Jakarta Sans, JetBrains Mono)
-
----
-
-##  6. Step-by-Step Installation & Local Setup
-
-### Prerequisites
-* **Python 3.10, 3.11, or 3.12** installed on your system.
-* **Git** installed.
-* *(Optional)* **Ollama** installed if running local neural LLM weights.
-
-### 1. Clone the Repository
 ```bash
 git clone https://github.com/AlooIsTasty/Krude-.git
 cd Krude-
-```
-
-### 2. Create and Activate a Virtual Environment
-```bash
-# Windows
 python -m venv venv
-venv\Scripts\activate
-
-# Linux / macOS
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 3. Install Dependencies
-```bash
+venv\Scripts\activate          # Linux/macOS: source venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 4. Configure Environment Variables
-Create a `.env` file in the root directory (or edit the existing one):
-```env
-NEWS_API_KEY="your_news_api_key_here"
-AI_API_KEY="your_ai_api_key_here"
-PORT=8000
-HOST="127.0.0.1"
-```
-
-### 5. Launch the Server & Dashboard
-```bash
-# Direct launcher
+copy .env.example .env         # Linux/macOS: cp .env.example .env
 python run.py
-
-# Or via FastAPI backend directly
-python backend/main.py
 ```
 
-Open your browser and navigate to:
-👉 **`http://127.0.0.1:8000/`**
+Open http://127.0.0.1:8000/ for the dashboard, or http://127.0.0.1:8000/docs for the API.
 
-Interactive OpenAPI / Swagger documentation:
-👉 **`http://127.0.0.1:8000/docs`**
+On first start, the server builds the DuckDB/SQLite database from the CSVs. To rebuild it by hand, run `python backend/data/db_loader.py`.
+
+### `.env`
+
+| Variable | Needed | Purpose |
+|---|---|---|
+| `NEWS_API_KEY` | Optional | NewsAPI headlines (free tier: 100 requests/day) |
+| `GNEWS_API_KEY` | Optional | GNews headlines (free tier: 100 requests/day) |
+| `NEWS_REFRESH_SECONDS` | Optional | Default 900; one request per provider per refresh |
+| `OLLAMA_HOST`, `OLLAMA_MODEL` | Optional | Defaults `http://localhost:11434`, `Krude-risk` |
+| `CORS_ORIGINS` | Optional | Comma-separated; default `http://127.0.0.1:8000,http://localhost:8000` |
+
+GDELT needs no key. Without NewsAPI and GNews keys, headlines come from GDELT only.
+
+### Fine-tuned model
+
+The headline scorer is Llama 3.2 3B with a LoRA adapter, served by Ollama as `Krude-risk`. It returns a score only; the explanation shown beside each score is rule-based. If Ollama isn't running, a keyword scorer takes over, and every score says which engine produced it.
+
+On Windows, if Ollama's CUDA 13 backend crashes, set the environment variable `OLLAMA_LLM_LIBRARY=cuda_v12` and restart Ollama.
 
 ---
 
-## 🔌 7. REST API Reference
+## API
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/risk/scores` | Returns composite risk scores ($0 - 10$), threat levels, and active news signals across all corridors. |
-| `GET` | `/api/risk/feed` | Returns deduplicated, sentiment-scored live maritime intelligence headlines with GDELT/NewsAPI provenance. |
-| `POST` | `/api/risk/refresh` | Triggers background pre-caching and news re-aggregation. |
-| `POST` | `/api/procurement/rank` | Executes multi-criteria ranking on global alternative crude suppliers for given corridor risk inputs. |
-| `POST` | `/api/scenario/simulate` | Simulates physical barrel deficit, landed cost spike, macro GDP loss, and CAD widening for custom disruptions. |
-| `POST` | `/api/model/analyze` | Evaluates arbitrary headlines using KrudeAi neural reasoning and outputs calibrated score + explanation. |
-| `GET` | `/api/model/status` | Returns active model backend (Ollama / PyTorch / Fast Engine), device status, and metadata. |
-| `GET` | `/api/data/macro-parameters` | Returns baseline Indian energy consumption, import dependency, and refinery capacities. |
+| Method | Endpoint | Returns |
+|---|---|---|
+| GET | `/api/risk` | Corridor scores with their latest headlines |
+| GET | `/api/risk/headlines` | Live headlines: source, link, time, score and engine |
+| GET | `/api/risk/feed-status` | Health of each news provider and the last refresh time |
+| POST | `/api/risk/refresh` | Force a news refresh |
+| GET | `/api/risk/supply-disruption-probabilities` | P(30 days) per corridor and per supplier |
+| GET | `/api/risk/threat-board` | Live index, pipeline stages, 30-day history, exposure |
+| GET | `/api/risk/empirical-validation?corridor=` | News-intensity vs Brent test |
+| GET | `/api/risk/timeline?corridor=` | Illustrative curve from a curated 2024-26 event list (not live) |
+| POST | `/api/scenario/simulate` | Scenario impacts |
+| POST | `/api/procurement/rank` | Suppliers ranked by risk-adjusted cost |
+| POST | `/api/procurement/optimize` | LP allocation of a supply gap |
+| POST | `/api/reserve/optimize-lp` | SPR release schedule for a scenario |
+| GET | `/api/reserve/policies` | Fixed-rate release policies compared |
+| GET | `/api/digital-twin/graph` | Route graph with flows |
+| POST | `/api/digital-twin/state` | All models run together for one disruption |
+| GET | `/api/model/status` | Ollama / model status |
+| POST | `/api/model/analyze` | Score one headline |
+| GET | `/api/stream/live` | Server-sent events with live corridor updates |
+| GET | `/api/database/*` | Raw tables: suppliers, routes, imports, ofac, landed-options, corridor-exposure, summary |
 
 ---
 
-##  8. Automated Test Suite
-
-Run the full automated test suite (verifying risk calculation, scenario simulation, multi-criteria procurement ranking, and linear optimization):
+## Tests
 
 ```bash
 python -m unittest backend/tests/test_engine.py
 ```
 
-Output:
-```
-----------------------------------------------------------------------
-Ran 13 tests in 4.141s
-
-OK
-[OK] Generated empirical validation plot -> backend/data/hormuz_18m_risk_plot.png
-```
-
----
-
-##  9. Authors & Team Credits
-
-Built with by:
-* **Pratik Phophaliya**
-* **Lalmuankima Colney**
-* **Mohak Chabbra**
+These 18 tests cover:
+- the database tables;
+- route distances;
+- quality penalties;
+- corridor exposure;
+- the risk pipeline, Threat Board stages and live-history probabilities;
+- the scenario model;
+- procurement ranking, the LP and its caps;
+- the reserve LP and policies;
+- the empirical check;
+- the twin graph.
 
 ---
 
-##  10. License
+## Known limitations
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+- **Model accuracy:** there are no validation metrics. The labelled holdout behind earlier figures (MAE 0.72) is not in the repository.
+- **Corridor probabilities:** 30-day probabilities are calibrated by hand (0.2% to 11%), not fitted to historical disruptions.
+- **Headline history:** the corridor history only covers the period since live collection started. The GDELT backfill runs one week per refresh, and GDELT rate-limits.
+- **Supplier routes:** each supplier's volume is split across its routes by capacity, not by the cargoes actually shipped on each route.
+
+---
+
+## Team
+
+Pratik Phophaliya · Lalmuankima Colney · Mohak Chabbra

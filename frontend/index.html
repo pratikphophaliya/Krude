@@ -113,12 +113,12 @@
           <!-- Bottom-Left Stat Row -->
           <div class="hero-stat-row" id="hero-stat-row">
             <div class="stat-pill">
-              <span class="stat-num" data-target="88" data-suffix="%">88%</span>
+              <span class="stat-num" id="hero-import-share" data-target="0" data-suffix="%">…</span>
               <span class="stat-label">imported</span>
             </div>
             <span class="stat-sep">·</span>
             <div class="stat-pill">
-              <span class="stat-range">40–45%</span>
+              <span class="stat-range" id="hero-hormuz-share">…</span>
               <span class="stat-label">via Hormuz</span>
             </div>
             <span class="stat-sep">·</span>
@@ -1106,7 +1106,7 @@
           <ul class="msc-list">
             <li><strong>Model:</strong> Llama 3.2 3B Instruct + LoRA (Ollama model <code>Krude-risk</code>)</li>
             <li><strong>Output:</strong> A 0&ndash;10 risk score only; the explanation shown with each score is rule-based</li>
-            <li><strong>Dataset:</strong> 1,512 verified maritime headlines &rarr; 1,313 train / 199 holdout</li>
+            <li><strong>Training data:</strong> not included in this repository</li>
             <li><strong>Inference Input:</strong> Raw breaking news headline string (no corridor leak at inference)</li>
             <li><strong>Serving Stack:</strong> Ollama (llama.cpp), F16 weights, CUDA 12 on the local GPU</li>
           </ul>
@@ -1122,57 +1122,16 @@
 
         <!-- Right: Metrics & Confusion Matrix -->
         <div class="model-metrics-card">
-          <h3 class="msc-title">Validation Metrics vs Baseline</h3>
+          <h3 class="msc-title">Validation Metrics</h3>
 
-          <div class="mae-comparison-row">
-            <div class="mae-bar-box">
-              <span class="mbb-label">TF-IDF + Logistic Regression</span>
-              <div class="mbb-bar">
-                <div class="mbb-fill" style="width: 78%;"></div>
-              </div>
-              <span class="mbb-val">MAE: 1.84</span>
+          <div class="model-limitation-box">
+            <i class="fa-solid fa-circle-info text-amber"></i>
+            <div>
+              <strong>Not reported.</strong> Earlier versions showed MAE 0.72 vs 1.84 for a TF-IDF baseline and a
+              199-row confusion matrix. The labelled holdout behind those numbers is not in this repository, so they
+              cannot be reproduced and have been removed. Every live score on this page names the engine that produced
+              it (fine-tuned model or keyword fallback).
             </div>
-            <div class="mae-bar-box highlight-mae">
-              <span class="mbb-label">KrudeAi (Ours)</span>
-              <div class="mbb-bar">
-                <div class="mbb-fill fill-green" style="width: 32%;"></div>
-              </div>
-              <span class="mbb-val text-green">MAE: 0.72</span>
-            </div>
-          </div>
-
-          <div class="confusion-matrix-box">
-            <span class="cm-title">3&times;3 Threat Level Confusion Matrix (199-Row Holdout)</span>
-            <table class="cm-table">
-              <thead>
-                <tr>
-                  <th>True \ Pred</th>
-                  <th>Low (0-4)</th>
-                  <th>Med (4-7)</th>
-                  <th>High (7-10)</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Low (0-4)</td>
-                  <td class="cell-hit">58</td>
-                  <td class="cell-miss">4</td>
-                  <td class="cell-zero">0</td>
-                </tr>
-                <tr>
-                  <td>Med (4-7)</td>
-                  <td class="cell-miss">5</td>
-                  <td class="cell-hit">62</td>
-                  <td class="cell-miss">6</td>
-                </tr>
-                <tr>
-                  <td>High (7-10)</td>
-                  <td class="cell-zero">1</td>
-                  <td class="cell-miss">4</td>
-                  <td class="cell-hit">59</td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
 
@@ -1260,7 +1219,7 @@
             </a>
           </div>
           <div class="footer-tech-stack">
-            <span class="footer-tag">FastAPI · DuckDB · NetworkX · KrudeAi</span>
+            <span class="footer-tag">FastAPI · DuckDB · PuLP · KrudeAi</span>
           </div>
         </div>
       </footer>
