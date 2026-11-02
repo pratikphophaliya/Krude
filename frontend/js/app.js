@@ -120,7 +120,7 @@ function initSupplyDisruptionStrip() {
       const hasOfac = s.sanctions_friction_multiplier > 1.0 || s.ofac_records_count > 0;
       
       return `
-        <div class="sp-sup-row" title="Data Fusion: News Risk + ${s.shipping_transit_days || 7}d Shipping Transit + ${hasOfac ? 'OFAC Scrutiny (+15%)' : 'Clean OFAC Status'}">
+        <div class="sp-sup-row" title="Route-weighted live corridor risk${hasOfac ? ' × 1.15 OFAC sanctions friction' : ''}">
           <div class="sp-sup-info">
             <div class="sp-sup-name-row">
               <span class="sp-sup-name">${s.supplier}</span>
@@ -130,7 +130,7 @@ function initSupplyDisruptionStrip() {
             </div>
             <div class="sp-sup-meta-row">
               <span class="sp-sup-note">${s.best_route}</span>
-              ${s.shipping_transit_days ? `<span class="sp-sup-shipping"><i class="fa-solid fa-ship"></i> ${s.shipping_transit_days}d (${(s.shipping_distance_km).toLocaleString()} km)</span>` : ''}
+              <span class="sp-sup-shipping" title="${s.vulnerability_reason}"><i class="fa-solid fa-ship"></i> ${s.vulnerability_reason}</span>
             </div>
           </div>
           <div class="sp-sup-prob ${pColor}">${s.p_display}</div>
@@ -308,28 +308,73 @@ function initProblemCoastalMap() {
 
   const mapNodes = {
     // Chokepoints & Foreign Hubs (Split name & sub, custom edge flipX/flipY)
-    hormuz: { lon: 56.25, lat: 26.56, name: "Strait of Hormuz", sub: "2,598 kbd", color: "#EF4444", isChoke: true, flipX: true, nudgeY: -6 },
-    babelmandeb: { lon: 43.33, lat: 12.58, name: "Bab-el-Mandeb", sub: "2,355 kbd", color: "#F59E0B", isChoke: true, flipX: true, nudgeY: 4 },
-    malacca: { lon: 102.89, lat: 1.43, name: "Malacca Strait", sub: "800 kbd", color: "#10B981", isChoke: true, flipX: true, nudgeY: -4 },
-    cape: { lon: 18.47, lat: -34.35, name: "Cape of Good Hope", sub: "650 kbd", color: "#38BDF8", isChoke: true, flipY: true, nudgeY: -8 },
+    hormuz: { lon: 56.25, lat: 26.56, name: "Strait of Hormuz", sub: "", color: "#EF4444", isChoke: true, flipX: true, nudgeY: -6 },
+    babelmandeb: { lon: 43.33, lat: 12.58, name: "Bab-el-Mandeb", sub: "", color: "#F59E0B", isChoke: true, flipX: true, nudgeY: 4 },
+    malacca: { lon: 102.89, lat: 1.43, name: "Malacca Strait", sub: "", color: "#10B981", isChoke: true, flipX: true, nudgeY: -4 },
+    cape: { lon: 18.47, lat: -34.35, name: "Cape of Good Hope", sub: "", color: "#38BDF8", isChoke: true, flipY: true, nudgeY: -8 },
     
     // Indian Coastal Hubs & Refineries (fine-tuned cartographic vertical nudges)
-    jamnagar: { lon: 70.06, lat: 22.47, name: "Jamnagar / Vadinar", sub: "1,760 kbd", color: "#FFFFFF", isIndia: true, nudgeY: -14 },
-    mumbai: { lon: 72.84, lat: 18.94, name: "Mumbai Hub", sub: "250 kbd", color: "#FFFFFF", isIndia: true, nudgeY: 8 },
+    jamnagar: { lon: 70.06, lat: 22.47, name: "Jamnagar / Vadinar", sub: "", color: "#FFFFFF", isIndia: true, nudgeY: -14 },
+    mumbai: { lon: 72.84, lat: 18.94, name: "Mumbai Hub", sub: "Refining hub", color: "#FFFFFF", isIndia: true, nudgeY: 8 },
     mangalore: { lon: 74.85, lat: 12.91, name: "Mangalore", sub: "MRPL + ISPRL", color: "#E11D48", isIndia: true, isSPR: true, nudgeY: 4 },
-    kochi: { lon: 76.26, lat: 9.93, name: "Kochi", sub: "310 kbd", color: "#FFFFFF", isIndia: true, nudgeY: 8 },
+    kochi: { lon: 76.26, lat: 9.93, name: "Kochi", sub: "", color: "#FFFFFF", isIndia: true, nudgeY: 8 },
     vizag: { lon: 83.21, lat: 17.68, name: "Visakhapatnam", sub: "HPCL + ISPRL", color: "#E11D48", isIndia: true, isSPR: true, nudgeY: -12 },
-    paradip: { lon: 86.67, lat: 20.26, name: "Paradip", sub: "300 kbd", color: "#FFFFFF", isIndia: true, nudgeY: 10 }
+    paradip: { lon: 86.67, lat: 20.26, name: "Paradip", sub: "", color: "#FFFFFF", isIndia: true, nudgeY: 10 }
   };
 
+  // Line width = the corridor's share of imports (filled from /api/database/corridor-exposure)
   const supplyRoutes = [
-    { from: "hormuz", to: "jamnagar", share: 0.481, color: "#EF4444", name: "Hormuz Primary", curveOffset: -35 },
-    { from: "hormuz", to: "mangalore", share: 0.200, color: "#EF4444", name: "Hormuz South", curveOffset: -25 },
-    { from: "babelmandeb", to: "jamnagar", share: 0.436, color: "#F59E0B", name: "Red Sea Lane", curveOffset: -40 },
-    { from: "babelmandeb", to: "kochi", share: 0.150, color: "#F59E0B", name: "Red Sea South", curveOffset: -20 },
-    { from: "malacca", to: "vizag", share: 0.148, color: "#10B981", name: "Malacca East", curveOffset: 25 },
-    { from: "cape", to: "jamnagar", share: 0.120, color: "#38BDF8", name: "Cape Longhaul", curveOffset: -60 }
+    { from: "hormuz", to: "jamnagar", key: "hormuz", share: 0, color: "#EF4444", name: "Hormuz", curveOffset: -35 },
+    { from: "babelmandeb", to: "jamnagar", key: "bab_el_mandeb", share: 0, color: "#F59E0B", name: "Bab-el-Mandeb", curveOffset: -40 },
+    { from: "malacca", to: "paradip", key: "malacca", share: 0, color: "#10B981", name: "Malacca", curveOffset: 25 },
+    { from: "cape", to: "jamnagar", key: "cape_of_good_hope", share: 0, color: "#38BDF8", name: "Cape of Good Hope", curveOffset: -60 }
   ];
+  const nodeKey = { hormuz: "hormuz", babelmandeb: "bab_el_mandeb", malacca: "malacca", cape: "cape_of_good_hope" };
+  const NAMES = { hormuz: "the Strait of Hormuz", bab_el_mandeb: "Bab-el-Mandeb", suez: "the Suez Canal", malacca: "the Malacca Strait", cape_of_good_hope: "the Cape of Good Hope" };
+  const DOMESTIC_KBD = 580;  // India's own crude output, assumptions.yaml (scenario_model.india_domestic_crude_kbd)
+  let focusKey = "hormuz";
+  let badgeText = {};
+
+  async function loadStoryNumbers() {
+    try {
+      const [eRes, gRes] = await Promise.all([fetch("/api/database/corridor-exposure"), fetch("/api/digital-twin/graph")]);
+      const exp = await eRes.json();
+      const total = exp.total_import_demand_kbd;
+      const c = exp.corridors;
+      const fmt = k => `${Math.round(k).toLocaleString()} kbd`;
+
+      Object.entries(nodeKey).forEach(([node, key]) => { mapNodes[node].sub = fmt(c[key].volume_at_risk_kbd); });
+      supplyRoutes.forEach(r => { r.share = c[r.key].share_of_india_imports_pct / 100; });
+      if (gRes.ok) {
+        const ports = (await gRes.json()).discharge_port_kbd || {};
+        mapNodes.jamnagar.sub = fmt((ports.Jamnagar || 0) + (ports.Vadinar || 0) + (ports.Mundra || 0));
+        mapNodes.kochi.sub = fmt(ports.Kochi || 0);
+        mapNodes.paradip.sub = fmt(ports.Paradip || 0);
+      }
+
+      const importShare = 100 * total / (total + DOMESTIC_KBD);
+      setText("story-import-share", `${importShare.toFixed(1)}%`);
+      setText("story-import-mbpd", (total / 1000).toFixed(2));
+      setText("story-import-kbd", fmt(total));
+
+      // Bab-el-Mandeb also carries the Suez barrels, so rank the four map corridors by their own volume
+      const ranked = ["hormuz", "bab_el_mandeb", "malacca", "cape_of_good_hope"].sort((a, b) => c[b].volume_at_risk_kbd - c[a].volume_at_risk_kbd);
+      focusKey = ranked[0];
+      setText("story-top-share", `${c[focusKey].share_of_india_imports_pct.toFixed(1)}%`);
+      setText("story-top-name", NAMES[focusKey]);
+      setText("story-hormuz-kbd", fmt(c.hormuz.volume_at_risk_kbd));
+      setText("story-redsea-kbd", fmt(c.bab_el_mandeb.volume_at_risk_kbd));
+      setText("story-concentration-body",
+        `Hormuz carries ${c.hormuz.share_of_india_imports_pct.toFixed(1)}% (${fmt(c.hormuz.volume_at_risk_kbd)}), ` +
+        `Bab-el-Mandeb ${c.bab_el_mandeb.share_of_india_imports_pct.toFixed(1)}%, the Cape ${c.cape_of_good_hope.share_of_india_imports_pct.toFixed(1)}% ` +
+        `and Malacca ${c.malacca.share_of_india_imports_pct.toFixed(1)}%, from the latest three months of imports.`);
+      badgeText = {
+        dependency: `Total Maritime Inflow Map (${importShare.toFixed(1)}% imported)`,
+        concentration: `${NAMES[focusKey].replace(/^the /, "")} Concentration (${c[focusKey].share_of_india_imports_pct.toFixed(1)}% of Imports)`,
+      };
+      renderMap();
+    } catch (e) { /* story keeps its placeholders */ }
+  }
 
   let currentBeat = "dependency";
 
@@ -338,7 +383,7 @@ function initProblemCoastalMap() {
     markersLayer.innerHTML = "";
     Object.keys(mapNodes).forEach(k => {
       const node = mapNodes[k];
-      const isDimmed = (currentBeat === "concentration" && !node.isIndia && k !== "hormuz");
+      const isDimmed = (currentBeat === "concentration" && !node.isIndia && nodeKey[k] !== focusKey);
       const el = createMarkerElement(node, isDimmed);
       markersLayer.appendChild(el);
     });
@@ -372,10 +417,10 @@ function initProblemCoastalMap() {
       const cy = midY + ny * curve;
 
       let opacity = 0.85;
-      let strokeWidth = Math.max(2, r.share * 9);
+      let strokeWidth = Math.max(1.5, r.share * 18);
 
       if (currentBeat === "concentration") {
-        if (!r.name.includes("Hormuz")) {
+        if (r.key !== focusKey) {
           opacity = 0.15;
           strokeWidth = 1.2;
         } else {
@@ -398,6 +443,7 @@ function initProblemCoastalMap() {
   }
 
   renderMap();
+  loadStoryNumbers();
 
   // Scroll Synchronization for the 3 Beats
   const beats = document.querySelectorAll(".narrative-beat");
@@ -411,8 +457,8 @@ function initProblemCoastalMap() {
         currentBeat = entry.target.getAttribute("data-beat") || "dependency";
 
         if (stateBadge) {
-          if (currentBeat === "dependency") stateBadge.querySelector(".state-text").textContent = "Total Maritime Inflow Map (88.2% Dependency)";
-          else if (currentBeat === "concentration") stateBadge.querySelector(".state-text").textContent = "Strait of Hormuz Concentration (48.1% of Crude)";
+          if (currentBeat === "dependency") stateBadge.querySelector(".state-text").textContent = badgeText.dependency || "Total Maritime Inflow Map";
+          else if (currentBeat === "concentration") stateBadge.querySelector(".state-text").textContent = badgeText.concentration || "Chokepoint Concentration";
           else if (currentBeat === "buffer") stateBadge.querySelector(".state-text").textContent = "Strategic Reserve Buffer (9.5 Days Sovereign Cover)";
         }
         renderMap();
@@ -425,49 +471,32 @@ function initProblemCoastalMap() {
 
 
 /* ==============================================================================
-   5. LIVE RISK BOARD
+   5. LIVE RISK BOARD (from /api/risk/threat-board)
    ============================================================================== */
-const CHOKEPOINTS_DATA = {
-  "Hormuz": { score: 6.8, delta: "+1.4", risk_level: "red", kbd: 2598, raw_signals: { news: 8.5, price: 6.2, vessel: 5.8, sanctions: 5.3 } },
-  "Bab-el-Mandeb": { score: 5.5, delta: "+0.8", risk_level: "amber", kbd: 2355, raw_signals: { news: 6.8, price: 5.0, vessel: 5.5, sanctions: 4.2 } },
-  "Suez": { score: 4.0, delta: "0.0", risk_level: "amber", kbd: 900, raw_signals: { news: 4.2, price: 4.0, vessel: 3.8, sanctions: 4.0 } },
-  "Malacca": { score: 2.0, delta: "-0.3", risk_level: "green", kbd: 800, raw_signals: { news: 2.2, price: 1.8, vessel: 2.0, sanctions: 1.5 } },
-  "Cape of Good Hope": { score: 1.2, delta: "0.0", risk_level: "green", kbd: 650, raw_signals: { news: 1.4, price: 1.0, vessel: 1.2, sanctions: 1.0 } }
-};
-
-const DEFAULT_SIGNALS = JSON.parse(JSON.stringify(CHOKEPOINTS_DATA));
-const FIXED_WEIGHTS = { news: 0.35, price: 0.25, vessel: 0.30, sanctions: 0.10 };
+// Filled from the API. score = live index x 10; stages are the pipeline's real intermediate values.
+const CHOKEPOINTS_DATA = {};
+const LIVE_BOARD = {};   // untouched copy of the API values, for "Reset corridor"
 let activeSelectedCorridor = "Hormuz";
+
+// Same formulas as backend/engine/risk_pipeline.py, so the what-if sliders reproduce the live index
+function computeIndex(st) {
+  const clamp = v => Math.max(0.05, Math.min(0.98, v));
+  const s = st.strongest_event, c = st.corroboration;
+  const index = s > 0 ? clamp(s + (1 - s) * (c > 0 ? c / (1 + c) : 0)) : 0.05;
+  const index7 = Math.max(0.05, index - st.change_7d);
+  const delta = index - index7;
+  const afterMomentum = clamp(delta > 0 ? index * (1 + Math.min(0.35, 0.4 * delta)) : index);
+  const final = clamp(afterMomentum * st.sanctions_multiplier);
+  return { index, afterMomentum, final, score: Math.round(final * 100) / 10, p30: 0.0022 + 0.108 * final };
+}
 
 function getThreatInfo(score) {
   if (score >= 7.0) {
-    return {
-      text: "CRITICAL",
-      stateClass: "state-red",
-      ringClass: "ring-red",
-      pillClass: "threat-red",
-      color: "var(--accent-red)",
-      strokeHex: "#EF4444"
-    };
+    return { text: "CRITICAL", stateClass: "state-red", ringClass: "ring-red", pillClass: "threat-red", color: "var(--accent-red)", strokeHex: "#EF4444" };
   } else if (score >= 4.0) {
-    return {
-      text: "MODERATE",
-      stateClass: "state-amber",
-      ringClass: "ring-amber",
-      pillClass: "threat-amber",
-      color: "var(--accent-amber)",
-      strokeHex: "#F59E0B"
-    };
-  } else {
-    return {
-      text: "LOW",
-      stateClass: "state-green",
-      ringClass: "ring-green",
-      pillClass: "threat-green",
-      color: "var(--accent-green)",
-      strokeHex: "#10B981"
-    };
+    return { text: "ELEVATED", stateClass: "state-amber", ringClass: "ring-amber", pillClass: "threat-amber", color: "var(--accent-amber)", strokeHex: "#F59E0B" };
   }
+  return { text: "LOW", stateClass: "state-green", ringClass: "ring-green", pillClass: "threat-green", color: "var(--accent-green)", strokeHex: "#10B981" };
 }
 
 function updateAllCorridorCards() {
@@ -478,8 +507,6 @@ function updateAllCorridorCards() {
 
     const isActive = (ck === activeSelectedCorridor);
     const threat = getThreatInfo(data.score);
-
-    // Clean previous state classes
     cardEl.classList.remove("active-card", "state-red", "state-amber", "state-green");
 
     const bigNum = cardEl.querySelector(".gauge-big-num");
@@ -487,30 +514,27 @@ function updateAllCorridorCards() {
 
     const ring = cardEl.querySelector(".gauge-bar-ring");
     if (ring) {
-      const offset = 264 - (264 * (data.score / 10));
-      ring.style.strokeDashoffset = offset;
+      ring.style.strokeDashoffset = 264 - (264 * (data.score / 10));
       ring.classList.remove("ring-white", "ring-red", "ring-amber", "ring-green");
     }
+
+    const exposureEl = cardEl.querySelector(".card-footer-stats span:first-child");
+    if (exposureEl) exposureEl.textContent = `${Math.round(data.exposure_kbd).toLocaleString()} kbd · P30 ${(data.p30 * 100).toFixed(1)}%`;
 
     const pill = cardEl.querySelector(".threat-pill");
     if (pill) {
       pill.classList.remove("threat-neutral", "threat-red", "threat-amber", "threat-green");
+      pill.textContent = data.overridden ? `${threat.text} · WHAT-IF` : threat.text;
     }
 
     if (isActive) {
       cardEl.classList.add("active-card", threat.stateClass);
       if (ring) ring.classList.add(threat.ringClass);
-      if (pill) {
-        pill.classList.add(threat.pillClass);
-        pill.textContent = threat.text;
-      }
+      if (pill) pill.classList.add(threat.pillClass);
       if (bigNum) bigNum.style.color = threat.color;
     } else {
       if (ring) ring.classList.add("ring-white");
-      if (pill) {
-        pill.classList.add("threat-neutral");
-        pill.textContent = threat.text;
-      }
+      if (pill) pill.classList.add("threat-neutral");
       if (bigNum) bigNum.style.color = "var(--text-pure)";
     }
   });
@@ -518,24 +542,25 @@ function updateAllCorridorCards() {
   drawAllSparklines();
 }
 
+const SLIDERS = {
+  news: { key: "strongest_event", toSlider: v => v * 10, fromSlider: v => v / 10, fmt: v => `${(v * 10).toFixed(1)} / 10` },
+  price: { key: "corroboration", toSlider: v => v, fromSlider: v => v, fmt: v => v.toFixed(2) },
+  vessel: { key: "change_7d", toSlider: v => v, fromSlider: v => v, fmt: v => `${v >= 0 ? "+" : ""}${v.toFixed(2)}` },
+  sanctions: { key: "sanctions_multiplier", toSlider: v => v, fromSlider: v => v, fmt: v => `×${v.toFixed(2)}` },
+};
+
 function initRiskBoard() {
   const cards = document.querySelectorAll(".chokepoint-card");
-  const sNews = document.getElementById("slider-news");
-  const sPrice = document.getElementById("slider-price");
-  const sVessel = document.getElementById("slider-vessel");
-  const sSanctions = document.getElementById("slider-sanctions");
 
   function syncSlidersToActiveCorridor() {
     const data = CHOKEPOINTS_DATA[activeSelectedCorridor];
     if (!data) return;
-    const titleEl = document.getElementById("weights-panel-title");
-    if (titleEl) titleEl.textContent = `${activeSelectedCorridor}: Signal Sensitivity Sandbox`;
-
-    if (sNews) { sNews.value = data.raw_signals.news; document.getElementById("val-weight-news").textContent = data.raw_signals.news.toFixed(1); }
-    if (sPrice) { sPrice.value = data.raw_signals.price; document.getElementById("val-weight-price").textContent = data.raw_signals.price.toFixed(1); }
-    if (sVessel) { sVessel.value = data.raw_signals.vessel; document.getElementById("val-weight-vessel").textContent = data.raw_signals.vessel.toFixed(1); }
-    if (sSanctions) { sSanctions.value = data.raw_signals.sanctions; document.getElementById("val-weight-sanctions").textContent = data.raw_signals.sanctions.toFixed(1); }
-
+    setText("weights-panel-title", `${activeSelectedCorridor}: What-if on the live pipeline`);
+    Object.entries(SLIDERS).forEach(([id, cfg]) => {
+      const el = document.getElementById(`slider-${id}`);
+      if (el) el.value = cfg.toSlider(data.stages[cfg.key]);
+      setText(`val-weight-${id}`, cfg.fmt(data.stages[cfg.key]));
+    });
     updateSignalBreakdownTable();
   }
 
@@ -550,149 +575,143 @@ function initRiskBoard() {
   function onSliderChange() {
     const data = CHOKEPOINTS_DATA[activeSelectedCorridor];
     if (!data) return;
-
-    data.raw_signals.news = parseFloat(sNews.value);
-    data.raw_signals.price = parseFloat(sPrice.value);
-    data.raw_signals.vessel = parseFloat(sVessel.value);
-    data.raw_signals.sanctions = parseFloat(sSanctions.value);
-
-    document.getElementById("val-weight-news").textContent = data.raw_signals.news.toFixed(1);
-    document.getElementById("val-weight-price").textContent = data.raw_signals.price.toFixed(1);
-    document.getElementById("val-weight-vessel").textContent = data.raw_signals.vessel.toFixed(1);
-    document.getElementById("val-weight-sanctions").textContent = data.raw_signals.sanctions.toFixed(1);
-
-    // Compute updated score ONLY for the active corridor
-    const computedScore = (
-      data.raw_signals.news * FIXED_WEIGHTS.news +
-      data.raw_signals.price * FIXED_WEIGHTS.price +
-      data.raw_signals.vessel * FIXED_WEIGHTS.vessel +
-      data.raw_signals.sanctions * FIXED_WEIGHTS.sanctions
-    );
-    data.score = Math.round(computedScore * 10) / 10;
-
+    Object.entries(SLIDERS).forEach(([id, cfg]) => {
+      const el = document.getElementById(`slider-${id}`);
+      if (el) data.stages[cfg.key] = cfg.fromSlider(parseFloat(el.value));
+      setText(`val-weight-${id}`, cfg.fmt(data.stages[cfg.key]));
+    });
+    const r = computeIndex(data.stages);
+    data.score = r.score;
+    data.p30 = r.p30;
+    data.overridden = true;
     updateAllCorridorCards();
     updateSignalBreakdownTable();
-    if (typeof refreshProcurementOrchestrator === "function" && activeProcurementMode === "sim") {
-      refreshProcurementOrchestrator();
-    }
+    if (activeProcurementMode === "sim") refreshProcurementOrchestrator();
   }
 
-  [sNews, sPrice, sVessel, sSanctions].forEach(sl => {
-    if (sl) sl.addEventListener("input", onSliderChange);
+  Object.keys(SLIDERS).forEach(id => {
+    const el = document.getElementById(`slider-${id}`);
+    if (el) el.addEventListener("input", onSliderChange);
   });
 
   const resetBtn = document.getElementById("reset-weights-btn");
   if (resetBtn) {
     resetBtn.addEventListener("click", (e) => {
       if (e) e.preventDefault();
-      if (DEFAULT_SIGNALS[activeSelectedCorridor]) {
-        CHOKEPOINTS_DATA[activeSelectedCorridor].raw_signals = JSON.parse(JSON.stringify(DEFAULT_SIGNALS[activeSelectedCorridor].raw_signals));
-        CHOKEPOINTS_DATA[activeSelectedCorridor].score = DEFAULT_SIGNALS[activeSelectedCorridor].score;
-
-        syncSlidersToActiveCorridor();
-        updateAllCorridorCards();
-        if (typeof refreshProcurementOrchestrator === "function" && activeProcurementMode === "sim") {
-          refreshProcurementOrchestrator();
-        }
-      }
+      const live = LIVE_BOARD[activeSelectedCorridor];
+      if (!live) return;
+      CHOKEPOINTS_DATA[activeSelectedCorridor] = JSON.parse(JSON.stringify(live));
+      syncSlidersToActiveCorridor();
+      updateAllCorridorCards();
+      if (activeProcurementMode === "sim") refreshProcurementOrchestrator();
     });
   }
 
-  syncSlidersToActiveCorridor();
-  updateAllCorridorCards();
+  async function loadBoard() {
+    try {
+      const res = await fetch("/api/risk/threat-board");
+      if (!res.ok) return;
+      const board = await res.json();
+      board.corridors.forEach(c => {
+        const entry = {
+          score: c.risk_score,
+          p30: c.p_disruption_30d,
+          exposure_kbd: c.exposure_kbd,
+          headlines_in_window: c.headlines_in_window,
+          top_events: c.top_events,
+          history: c.history.map(h => h.risk_score),
+          stages: {
+            strongest_event: c.strongest_event,
+            corroboration: c.corroboration,
+            change_7d: Math.round((c.news_index - c.news_index_7d_ago) * 1000) / 1000,
+            sanctions_multiplier: c.sanctions_multiplier,
+          },
+        };
+        LIVE_BOARD[c.corridor] = JSON.parse(JSON.stringify(entry));
+        // Keep an analyst's what-if across refreshes
+        if (!(CHOKEPOINTS_DATA[c.corridor] && CHOKEPOINTS_DATA[c.corridor].overridden)) {
+          CHOKEPOINTS_DATA[c.corridor] = entry;
+        }
+      });
+      setText("threat-board-basis", `Live: ${board.history_headlines} stored headlines · as of ${board.as_of}`);
+      syncSlidersToActiveCorridor();
+      updateAllCorridorCards();
+    } catch (e) {
+      setText("threat-board-basis", "Threat board unavailable: backend not reachable");
+    }
+  }
+
+  loadBoard();
+  setInterval(loadBoard, 5 * 60 * 1000);
 }
 
 function updateSignalBreakdownTable() {
   const data = CHOKEPOINTS_DATA[activeSelectedCorridor];
   if (!data) return;
+  setText("breakdown-corridor-title", `${activeSelectedCorridor}: How the index is built`);
 
-  const titleEl = document.getElementById("breakdown-corridor-title");
-  if (titleEl) titleEl.textContent = `${activeSelectedCorridor}: Signal Contribution Breakdown`;
+  const st = data.stages;
+  const r = computeIndex(st);
+  const rows = {
+    news: [`${(st.strongest_event * 10).toFixed(1)} / 10`, "strongest event today", st.strongest_event > 0 ? st.strongest_event : 0.05],
+    price: [st.corroboration.toFixed(2), "damped corroboration", r.index],
+    vessel: [`${st.change_7d >= 0 ? "+" : ""}${st.change_7d.toFixed(2)}`, `×${(r.afterMomentum / r.index).toFixed(3)} momentum`, r.afterMomentum],
+    sanctions: [`×${st.sanctions_multiplier.toFixed(2)}`, "sanctions factor", r.final],
+  };
+  Object.entries(rows).forEach(([id, [input, effect, after]]) => {
+    setText(`raw-sig-${id}`, input);
+    setText(`wt-sig-${id}`, effect);
+    setText(`contrib-sig-${id}`, (after * 10).toFixed(2));
+  });
+  setText("breakdown-result", `Index ${r.score.toFixed(1)} / 10 → P(disruption, 30 days) ${(r.p30 * 100).toFixed(1)}% · ${data.headlines_in_window} headline${data.headlines_in_window === 1 ? "" : "s"} in the 45-day window`);
 
-  const raw = data.raw_signals;
-  const contribN = (raw.news * FIXED_WEIGHTS.news).toFixed(2);
-  const contribP = (raw.price * FIXED_WEIGHTS.price).toFixed(2);
-  const contribV = (raw.vessel * FIXED_WEIGHTS.vessel).toFixed(2);
-  const contribS = (raw.sanctions * FIXED_WEIGHTS.sanctions).toFixed(2);
-
-  const rawNewsEl = document.getElementById("raw-sig-news");
-  if (rawNewsEl) rawNewsEl.textContent = `${raw.news.toFixed(1)} / 10`;
-  const wtNewsEl = document.getElementById("wt-sig-news");
-  if (wtNewsEl) wtNewsEl.textContent = FIXED_WEIGHTS.news.toFixed(2);
-  const contribNewsEl = document.getElementById("contrib-sig-news");
-  if (contribNewsEl) contribNewsEl.textContent = `+${contribN}`;
-
-  const rawPriceEl = document.getElementById("raw-sig-price");
-  if (rawPriceEl) rawPriceEl.textContent = `${raw.price.toFixed(1)} / 10`;
-  const wtPriceEl = document.getElementById("wt-sig-price");
-  if (wtPriceEl) wtPriceEl.textContent = FIXED_WEIGHTS.price.toFixed(2);
-  const contribPriceEl = document.getElementById("contrib-sig-price");
-  if (contribPriceEl) contribPriceEl.textContent = `+${contribP}`;
-
-  const rawVesselEl = document.getElementById("raw-sig-vessel");
-  if (rawVesselEl) rawVesselEl.textContent = `${raw.vessel.toFixed(1)} / 10`;
-  const wtVesselEl = document.getElementById("wt-sig-vessel");
-  if (wtVesselEl) wtVesselEl.textContent = FIXED_WEIGHTS.vessel.toFixed(2);
-  const contribVesselEl = document.getElementById("contrib-sig-vessel");
-  if (contribVesselEl) contribVesselEl.textContent = `+${contribV}`;
-
-  const rawSanctionsEl = document.getElementById("raw-sig-sanctions");
-  if (rawSanctionsEl) rawSanctionsEl.textContent = `${raw.sanctions.toFixed(1)} / 10`;
-  const wtSanctionsEl = document.getElementById("wt-sig-sanctions");
-  if (wtSanctionsEl) wtSanctionsEl.textContent = FIXED_WEIGHTS.sanctions.toFixed(2);
-  const contribSanctionsEl = document.getElementById("contrib-sig-sanctions");
-  if (contribSanctionsEl) contribSanctionsEl.textContent = `+${contribS}`;
+  const evEl = document.getElementById("breakdown-top-events");
+  if (evEl) {
+    evEl.innerHTML = "";
+    (data.top_events || []).forEach(e => {
+      const li = document.createElement("li");
+      li.textContent = `${e.date} · scored ${e.raw_score.toFixed(1)}/10, weight today ${e.weight_now.toFixed(2)} · ${e.title}${e.source ? ` (${e.source})` : ""}`;
+      evEl.appendChild(li);
+    });
+    if (!evEl.children.length) {
+      const li = document.createElement("li");
+      li.textContent = "No live headlines for this corridor in the last 45 days.";
+      evEl.appendChild(li);
+    }
+  }
 }
 
 function drawAllSparklines() {
-  const sparkConfigs = {
-    "sparkline-hormuz": [3.2, 3.4, 4.0, 5.1, 5.8, 6.2, 6.5, 6.8],
-    "sparkline-babelmandeb": [4.5, 4.8, 5.0, 5.2, 5.4, 5.5],
-    "sparkline-suez": [3.8, 3.9, 4.1, 4.0, 4.0, 4.0],
-    "sparkline-malacca": [2.4, 2.3, 2.1, 2.0, 2.0],
-    "sparkline-cape": [1.2, 1.2, 1.1, 1.2, 1.2]
+  const canvasIds = {
+    "Hormuz": "sparkline-hormuz",
+    "Bab-el-Mandeb": "sparkline-babelmandeb",
+    "Suez": "sparkline-suez",
+    "Malacca": "sparkline-malacca",
+    "Cape of Good Hope": "sparkline-cape"
   };
 
-  const corridorMap = {
-    "sparkline-hormuz": "Hormuz",
-    "sparkline-babelmandeb": "Bab-el-Mandeb",
-    "sparkline-suez": "Suez",
-    "sparkline-malacca": "Malacca",
-    "sparkline-cape": "Cape of Good Hope"
-  };
-
-  Object.keys(sparkConfigs).forEach(id => {
+  Object.entries(canvasIds).forEach(([ck, id]) => {
     const canvas = document.getElementById(id);
-    if (!canvas) return;
+    const data = CHOKEPOINTS_DATA[ck];
+    if (!canvas || !data || !data.history || data.history.length < 2) return;
     const ctx = canvas.getContext("2d");
-    const vals = sparkConfigs[id];
-    const w = canvas.width;
-    const h = canvas.height;
-
-    const ck = corridorMap[id];
+    const vals = data.history;
+    const w = canvas.width, h = canvas.height;
     const isActive = (ck === activeSelectedCorridor);
-    const score = CHOKEPOINTS_DATA[ck] ? CHOKEPOINTS_DATA[ck].score : 5.0;
-    const threat = getThreatInfo(score);
 
     ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = isActive ? threat.strokeHex : "rgba(255, 255, 255, 0.4)";
+    ctx.strokeStyle = isActive ? getThreatInfo(data.score).strokeHex : "rgba(255, 255, 255, 0.4)";
     ctx.lineWidth = isActive ? 2.5 : 1.5;
     ctx.beginPath();
-
-    const min = Math.min(...vals) - 0.5;
-    const max = Math.max(...vals) + 0.5;
-    const range = max - min || 1;
-
+    // Fixed 0-10 scale so corridors are comparable
     vals.forEach((v, idx) => {
       const x = (idx / (vals.length - 1)) * (w - 10) + 5;
-      const y = h - 6 - ((v - min) / range) * (h - 12);
-      if (idx === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      const y = h - 6 - (v / 10) * (h - 12);
+      if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
     ctx.stroke();
   });
 }
-
 /* ==============================================================================
    6. LIVE GDELT HEADLINE TICKER & HERO MODEL SCORE SYNC
    ============================================================================== */
@@ -1543,7 +1562,7 @@ async function initReserveChart() {
 }
 
 /* ==============================================================================
-   11. DIGITAL TWIN (World Scale NetworkX Graph - Static World Basemap)
+   11. DIGITAL TWIN (from /api/digital-twin/graph and /api/digital-twin/state)
    ============================================================================== */
 // World Mercator Bounds (Houston through Malacca) - dedicated to Digital Twin Map
 const WORLD_LON_MIN = -130.0, WORLD_LON_MAX = 150.0;
@@ -1561,230 +1580,158 @@ function projectWorld(lon, lat) {
 function initDigitalTwinMap() {
   const routesSvg = document.getElementById("twin-routes-svg");
   const markersLayer = document.getElementById("twin-markers-layer");
+  const statusText = document.getElementById("twin-status-text");
   if (!markersLayer || !routesSvg) return;
 
-  const initialNodes = [
-    // Global Supply Origins
-    { id: "src_houston", name: "Houston / Corpus Christi", sub: "US WTI Export", lon: -95.36, lat: 29.76, type: "country", risk: 0 },
-    { id: "src_santos", name: "Santos Basin (Brazil)", sub: "Tupi Heavy Sweet", lon: -46.33, lat: -23.96, type: "country", risk: 0 },
-    { id: "src_primorsk", name: "Primorsk (Baltic)", sub: "Russian Urals", lon: 28.60, lat: 60.36, type: "country", risk: 0 },
-    { id: "src_rt", name: "Ras Tanura", sub: "Saudi Aramco", lon: 50.12, lat: 26.64, type: "country", risk: 0 },
-    { id: "src_bot", name: "Basrah Port", sub: "SOMO Iraq", lon: 47.83, lat: 30.50, type: "country", risk: 0 },
-    { id: "src_yanbu", name: "Yanbu", sub: "Red Sea Terminal", lon: 38.06, lat: 24.08, type: "country", risk: 0 },
-    { id: "src_duqm", name: "Duqm Hub", sub: "Oman (Direct Bypass)", lon: 57.70, lat: 19.66, type: "country", risk: 0 },
-    
-    // Critical Chokepoints
-    { id: "ck_cape", name: "Cape of Good Hope", sub: "Chokepoint", lon: 18.47, lat: -34.35, type: "choke", risk: 0, isChoke: true },
-    { id: "ck_suez", name: "Suez Canal", sub: "Chokepoint", lon: 32.34, lat: 30.58, type: "choke", risk: 0, isChoke: true },
-    { id: "ck_babel", name: "Bab-el-Mandeb", sub: "Chokepoint", lon: 43.33, lat: 12.58, type: "choke", risk: 0, isChoke: true },
-    { id: "ck_hormuz", name: "Strait of Hormuz", sub: "Chokepoint", lon: 56.25, lat: 26.56, type: "choke", risk: 0, isChoke: true },
-    { id: "ck_malacca", name: "Malacca Strait", sub: "Chokepoint", lon: 102.89, lat: 1.43, type: "choke", risk: 0, isChoke: true },
-    
-    // Indian Discharge Ports & Refineries
-    { id: "dest_jam", name: "Jamnagar Hub", sub: "1,760 kbd", lon: 70.06, lat: 22.47, type: "dest", risk: 0 },
-    { id: "dest_vad", name: "Vadinar Port", sub: "Discharge", lon: 69.72, lat: 22.45, type: "dest", risk: 0 },
-    { id: "dest_mumbai", name: "Mumbai Port", sub: "250 kbd", lon: 72.84, lat: 18.94, type: "dest", risk: 0 },
-    { id: "dest_mang", name: "Mangalore / Padur Hub", sub: "MRPL + SPR", lon: 74.85, lat: 12.91, type: "dest", risk: 0 },
-    { id: "dest_kochi", name: "Kochi", sub: "310 kbd", lon: 76.26, lat: 9.93, type: "dest", risk: 0 },
-    { id: "dest_paradip", name: "Paradip Port", sub: "300 kbd", lon: 86.67, lat: 20.26, type: "dest", risk: 0 },
-    { id: "dest_vizag", name: "Vizag Port & SPR", sub: "HPCL + ISPRL", lon: 83.21, lat: 17.68, type: "dest", risk: 0 },
-    
-    // Strategic Petroleum Reserve Cavern
-    { id: "spr_padur", name: "Padur SPR", sub: "2.5 MMT", lon: 74.78, lat: 13.23, type: "spr", risk: 0 },
-    { id: "spr_vizag", name: "Vizag SPR", sub: "1.33 MMT", lon: 83.25, lat: 17.72, type: "spr", risk: 0 }
-  ];
+  let graph = null;
+  let corridorP = {};          // live P(disruption, 30d) per corridor
+  let hit = null;              // { corridor, nodes: Set, stage }
 
-  let nodes = JSON.parse(JSON.stringify(initialNodes));
-  let activeCascadeCorridor = null;
-
-  // Dedicated Oceanic Edges with Curve Offsets & Corridor Tagging
-  const edges = [
-    // Cape of Good Hope longhaul routes (Atlantic -> Indian Ocean)
-    { u: "src_houston", v: "ck_cape", corridor: "Cape of Good Hope", curve: -15 },
-    { u: "src_santos", v: "ck_cape", corridor: "Cape of Good Hope", curve: -12 },
-    { u: "ck_cape", v: "dest_jam", corridor: "Cape of Good Hope", curve: -18 },
-    { u: "ck_cape", v: "dest_mang", corridor: "Cape of Good Hope", curve: -14 },
-
-    // Suez Canal & Mediterranean routes
-    { u: "src_primorsk", v: "ck_suez", corridor: "Suez", curve: 12 },
-    { u: "ck_suez", v: "ck_babel", corridor: "Suez", curve: 4 },
-
-    // Bab-el-Mandeb & Red Sea routes
-    { u: "src_yanbu", v: "ck_babel", corridor: "Bab-el-Mandeb", curve: 4 },
-    { u: "ck_babel", v: "dest_jam", corridor: "Bab-el-Mandeb", curve: -12 },
-    { u: "ck_babel", v: "dest_kochi", corridor: "Bab-el-Mandeb", curve: -8 },
-
-    // Hormuz routes (Persian Gulf -> Indian Refineries)
-    { u: "src_rt", v: "ck_hormuz", corridor: "Hormuz", curve: 3 },
-    { u: "src_bot", v: "ck_hormuz", corridor: "Hormuz", curve: 4 },
-    { u: "ck_hormuz", v: "dest_jam", corridor: "Hormuz", curve: -8 },
-    { u: "ck_hormuz", v: "dest_vad", corridor: "Hormuz", curve: -6 },
-    { u: "ck_hormuz", v: "dest_mumbai", corridor: "Hormuz", curve: -8 },
-    { u: "ck_hormuz", v: "dest_mang", corridor: "Hormuz", curve: -10 },
-
-    // Direct Arabian Sea Bypass
-    { u: "src_duqm", v: "dest_jam", corridor: "Direct", curve: -6 },
-
-    // Malacca Strait routes
-    { u: "ck_malacca", v: "dest_paradip", corridor: "Malacca", curve: 10 },
-    { u: "ck_malacca", v: "dest_vizag", corridor: "Malacca", curve: 8 },
-
-    // SPR Pipeline Links
-    { u: "dest_mang", v: "spr_padur", corridor: "SPR", curve: 0 },
-    { u: "dest_vizag", v: "spr_vizag", corridor: "SPR", curve: 0 }
-  ];
-
-  function drawCurvedEdge(a, b, curveOffset = 0) {
-    const x1 = a.left;
-    const y1 = a.top;
-    const x2 = b.left;
-    const y2 = b.top;
-
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist === 0) return `M ${x1} ${y1}`;
-
-    const midX = (x1 + x2) / 2;
-    const midY = (y1 + y2) / 2;
-
-    const nx = -dy / dist;
-    const ny = dx / dist;
-
-    const cx = midX + nx * curveOffset;
-    const cy = midY + ny * curveOffset;
-
-    return `M ${x1.toFixed(2)} ${y1.toFixed(2)} Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+  function twinStatus(text, cls) {
+    if (!statusText) return;
+    statusText.textContent = text;
+    statusText.className = cls || "";
   }
 
-  function renderTwin() {
-    // 1. Render Markers with zero-size anchor using projectWorld
-    markersLayer.innerHTML = "";
-    nodes.forEach(n => {
-      let dotColor = "#10B981";
-      if (n.risk > 0.4) dotColor = "#EF4444";
-      else if (n.type === "country") dotColor = "#38BDF8";
-      else if (n.type === "choke") dotColor = "#F59E0B";
-      else if (n.type === "spr") dotColor = "#E11D48";
+  function nodeColor(n) {
+    if (hit && hit.nodes.has(n.id) && hit.stage >= (n.type === "choke" ? 1 : n.type === "origin" ? 1 : 2)) return "#EF4444";
+    if (n.type === "origin") return "#38BDF8";
+    if (n.type === "choke") {
+      const p = corridorP[n.name] || 0;
+      return p >= 0.07 ? "#EF4444" : (p >= 0.04 ? "#F59E0B" : "#10B981");
+    }
+    if (n.type === "spr") return "#E11D48";
+    return "#10B981";
+  }
 
-      const nodeWithColor = { ...n, color: dotColor, isChoke: n.risk > 0.4 || n.type === 'choke' };
-      const el = createMarkerElement(nodeWithColor, false, projectWorld);
+  function nodeLabel(n) {
+    if (n.type === "choke") return `${Math.round(n.kbd).toLocaleString()} kbd · live P30 ${((corridorP[n.name] || 0) * 100).toFixed(1)}%`;
+    if (n.type === "spr") return n.label;
+    if (n.type === "origin") return `${n.country} · ${Math.round(n.kbd).toLocaleString()} kbd`;
+    return `${Math.round(n.kbd).toLocaleString()} kbd received`;
+  }
+
+  function curvePath(a, b) {
+    const dx = b.left - a.left, dy = b.top - a.top;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist === 0) return `M ${a.left} ${a.top}`;
+    const bend = Math.min(6, dist * 0.12);
+    const cx = (a.left + b.left) / 2 - (dy / dist) * bend;
+    const cy = (a.top + b.top) / 2 + (dx / dist) * bend;
+    return `M ${a.left.toFixed(2)} ${a.top.toFixed(2)} Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${b.left.toFixed(2)} ${b.top.toFixed(2)}`;
+  }
+
+  function render() {
+    if (!graph) return;
+    const byId = Object.fromEntries(graph.nodes.map(n => [n.id, n]));
+
+    markersLayer.innerHTML = "";
+    graph.nodes.forEach(n => {
+      const color = nodeColor(n);
+      const el = createMarkerElement({ ...n, sub: nodeLabel(n), color, isChoke: n.type === "choke" || color === "#EF4444" }, false, projectWorld);
       markersLayer.appendChild(el);
     });
 
-    // 2. Render Curved NetworkX Maritime Routes (SVG viewBox 0 0 100 100)
     routesSvg.innerHTML = "";
-    edges.forEach(e => {
-      const u = nodes.find(n => n.id === e.u);
-      const v = nodes.find(n => n.id === e.v);
+    const maxKbd = Math.max(...graph.segments.map(s => s.kbd), 1);
+    graph.segments.forEach(seg => {
+      const u = byId[seg.from], v = byId[seg.to];
       if (!u || !v) return;
-
-      const a = projectWorld(u.lon, u.lat);
-      const b = projectWorld(v.lon, v.lat);
-
-      const isInterdicted = activeCascadeCorridor && (e.corridor === activeCascadeCorridor || (activeCascadeCorridor === "Hormuz" && e.corridor === "SPR" && u.id === "dest_mang"));
-
+      const cut = hit && hit.stage >= 1 && seg.corridors.includes(hit.corridor);
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", drawCurvedEdge(a, b, e.curve || 0));
+      path.setAttribute("d", curvePath(projectWorld(u.lon, u.lat), projectWorld(v.lon, v.lat)));
       path.setAttribute("fill", "none");
-      path.setAttribute("stroke", isInterdicted ? "#EF4444" : "#475569");
-      path.setAttribute("stroke-width", isInterdicted ? "0.45" : "0.18");
-      path.setAttribute("stroke-opacity", isInterdicted ? "1.0" : "0.55");
+      path.setAttribute("stroke", cut ? "#EF4444" : "#64748B");
+      // Width scales with the barrels on the segment
+      path.setAttribute("stroke-width", (0.6 + 3.4 * Math.sqrt(seg.kbd / maxKbd)).toFixed(2));
+      path.setAttribute("stroke-opacity", cut ? "0.95" : "0.5");
       path.setAttribute("vector-effect", "non-scaling-stroke");
-      if (isInterdicted) {
-        path.setAttribute("stroke-dasharray", "1.5, 0.8");
-      }
+      if (cut) path.setAttribute("stroke-dasharray", "4 3");
+      const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      title.textContent = `${u.name} → ${v.name}: ${Math.round(seg.kbd).toLocaleString()} kbd`;
+      path.appendChild(title);
       routesSvg.appendChild(path);
     });
   }
 
-  renderTwin();
-
-  // Cascade Trigger Button with Corridor-Specific Logic & Status Text
-  const btnCascade = document.getElementById("twin-propagate-btn");
-  const statusText = document.getElementById("twin-status-text");
-
-  const CORRIDOR_IMPACTS = {
-    "Hormuz": {
-      chokeId: "ck_hormuz",
-      origins: ["src_rt", "src_bot"],
-      dests: ["dest_jam", "dest_vad", "dest_mumbai", "dest_mang"],
-      sprs: ["spr_padur"],
-      statusHtml: `<span class="text-red font-bold"><i class="fa-solid fa-radiation"></i> Strait of Hormuz Interdiction Active: 2,598 kbd crude blocked (48.1% of Indian imports). Direct cascade impact on Jamnagar, Vadinar, Mumbai & Mangalore ISPRL Caverns.</span>`
-    },
-    "Bab-el-Mandeb": {
-      chokeId: "ck_babel",
-      origins: ["src_yanbu"],
-      dests: ["dest_jam", "dest_kochi"],
-      sprs: [],
-      statusHtml: `<span class="text-amber font-bold"><i class="fa-solid fa-triangle-exclamation"></i> Bab-el-Mandeb Crisis Active: 2,355 kbd Red Sea crude flow disrupted. Rerouting via Cape of Good Hope (+12–14 days lag) impacting Kochi & Jamnagar.</span>`
-    },
-    "Suez": {
-      chokeId: "ck_suez",
-      origins: ["src_primorsk"],
-      dests: ["dest_jam", "dest_kochi"],
-      sprs: [],
-      statusHtml: `<span class="text-amber font-bold"><i class="fa-solid fa-triangle-exclamation"></i> Suez Canal Obstruction Active: 900 kbd European & Mediterranean crude delayed. Diverting via Cape of Good Hope.</span>`
-    },
-    "Malacca": {
-      chokeId: "ck_malacca",
-      origins: [],
-      dests: ["dest_paradip", "dest_vizag"],
-      sprs: ["spr_vizag"],
-      statusHtml: `<span class="text-amber font-bold"><i class="fa-solid fa-triangle-exclamation"></i> Malacca Strait Congestion Active: 800 kbd Russian Pacific & Southeast Asian imports delayed into Visakhapatnam & Paradip refineries.</span>`
-    }
-  };
-
-  if (btnCascade) {
-    btnCascade.addEventListener("click", () => {
-      const selectedChoke = document.getElementById("twin-chokepoint-select").value;
-      const config = CORRIDOR_IMPACTS[selectedChoke] || CORRIDOR_IMPACTS["Hormuz"];
-
-      // Reset risks first
-      nodes = JSON.parse(JSON.stringify(initialNodes));
-      activeCascadeCorridor = selectedChoke;
-
-      // Stage 1: Chokepoint & Origins Interdiction
-      const chokeNode = nodes.find(n => n.id === config.chokeId);
-      if (chokeNode) chokeNode.risk = 1.0;
-      nodes.filter(n => config.origins.includes(n.id)).forEach(o => o.risk = 0.85);
-
-      if (statusText) {
-        statusText.innerHTML = `<span class="text-red font-bold"><i class="fa-solid fa-radiation"></i> Interdiction Active at ${selectedChoke}: Propagating wave through corridor...</span>`;
-      }
-      renderTwin();
-
-      // Stage 2: Discharge Hub Impact (250ms)
-      setTimeout(() => {
-        nodes.filter(n => config.dests.includes(n.id)).forEach(d => d.risk = 0.60);
-        renderTwin();
-      }, 250);
-
-      // Stage 3: SPR Cavern Response (500ms)
-      setTimeout(() => {
-        nodes.filter(n => config.sprs.includes(n.id)).forEach(s => s.risk = 0.36);
-        if (statusText) {
-          statusText.innerHTML = config.statusHtml;
-        }
-        renderTwin();
-      }, 500);
-    });
+  function readyText() {
+    if (!graph) return;
+    twinStatus(`Live graph: ${Math.round(graph.mapped_kbd).toLocaleString()} of ${Math.round(graph.total_imports_kbd).toLocaleString()} kbd mapped on ${graph.routes.length} routes ` +
+      `(3-month average imports; ${Math.round(graph.unmapped_kbd).toLocaleString()} kbd from suppliers without route data). Line width = barrels per day.`);
   }
 
-  // Reset Button
+  async function load() {
+    try {
+      const [gRes, pRes] = await Promise.all([fetch("/api/digital-twin/graph"), fetch("/api/risk/supply-disruption-probabilities")]);
+      if (gRes.ok) graph = await gRes.json();
+      if (pRes.ok) {
+        const p = await pRes.json();
+        corridorP = Object.fromEntries((p.corridors || []).map(c => [c.corridor, c.p_disruption_30d]));
+      }
+      render();
+      if (!hit) readyText();
+    } catch (e) {
+      twinStatus("Digital twin unavailable: backend not reachable");
+    }
+  }
+
+  async function triggerCascade() {
+    if (!graph) return;
+    const corridor = document.getElementById("twin-chokepoint-select").value;
+    const sev = parseFloat((document.getElementById("sim-slider-severity") || {}).value || "100");
+    const days = parseInt((document.getElementById("sim-slider-duration") || {}).value || "30", 10);
+
+    // Which routes, origins and ports lose barrels
+    const affected = graph.routes.filter(r => r.corridors.includes(corridor));
+    const nodes = new Set([`choke:${{ "Hormuz": "hormuz", "Bab-el-Mandeb": "bab_el_mandeb", "Suez": "suez", "Malacca": "malacca", "Cape of Good Hope": "cape_of_good_hope" }[corridor]}`]);
+    const portLoss = {};
+    affected.forEach(r => {
+      nodes.add(`load:${r.load_port}`);
+      nodes.add(`dest:${r.discharge_port}`);
+      portLoss[r.discharge_port] = (portLoss[r.discharge_port] || 0) + r.kbd * sev / 100;
+    });
+
+    hit = { corridor, nodes, stage: 1 };
+    render();
+    twinStatus(`Disrupting ${corridor} at ${sev}% for ${days} days: running scenario, procurement and reserve models…`, "text-red font-bold");
+    setTimeout(() => { if (hit) { hit.stage = 2; render(); } }, 300);
+
+    try {
+      const res = await fetch("/api/digital-twin/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selected_corridor: corridor, disruption_severity_pct: sev, disruption_duration_days: days })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const state = await res.json();
+      const imp = state.scenario_impact.impacts;
+      const ports = Object.entries(portLoss).sort((a, b) => b[1] - a[1]).slice(0, 4)
+        .map(([p, k]) => `${p} −${Math.round(k).toLocaleString()}`).join(", ");
+      twinStatus(
+        `${corridor} ${sev}% for ${days}d: ${Math.round(state.scenario_impact.scenario_inputs.blocked_supply_kbd).toLocaleString()} kbd blocked ` +
+        `for ${imp.gap_days} days (${ports || "no mapped port"} kbd). Brent → $${imp.new_brent_usd.toFixed(0)}, ` +
+        `import bill +$${imp.estimated_additional_cost_usd_billion.toFixed(1)}B. Action: ${state.latest_log.action}`,
+        "text-red font-bold");
+    } catch (e) {
+      twinStatus(`Cascade shown from the route graph only; the models did not respond (${e.message}).`, "text-amber font-bold");
+    }
+  }
+
+  const btnCascade = document.getElementById("twin-propagate-btn");
+  if (btnCascade) btnCascade.addEventListener("click", triggerCascade);
+
   const btnReset = document.getElementById("twin-reset-btn");
   if (btnReset) {
     btnReset.addEventListener("click", () => {
-      nodes = JSON.parse(JSON.stringify(initialNodes));
-      activeCascadeCorridor = null;
-      if (statusText) {
-        statusText.innerHTML = "<span>Ready · Decay factor: 0.60 per hop | Select a strategic chokepoint and click Trigger Cascade to evaluate interdiction.</span>";
-      }
-      renderTwin();
+      hit = null;
+      render();
+      readyText();
     });
   }
-}
 
+  load();
+  setInterval(load, 5 * 60 * 1000);
+}
 /* ==============================================================================
    12. AI MODEL SANDBOX
    ============================================================================== */

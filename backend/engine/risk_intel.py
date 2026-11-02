@@ -54,6 +54,22 @@ except ImportError:
 logger = logging.getLogger("krude.risk_intel")
 
 CORRIDORS = ["Hormuz", "Bab-el-Mandeb", "Malacca", "Cape of Good Hope", "Suez"]
+CHOKEPOINT_KEY = {"Hormuz": "hormuz", "Bab-el-Mandeb": "bab_el_mandeb", "Suez": "suez",
+                  "Malacca": "malacca", "Cape of Good Hope": "cape_of_good_hope"}
+
+# OFAC programs that sanction a supplier country's oil sector (ofac.csv stores ISO codes, not names,
+# so suppliers are matched on program instead)
+SANCTIONS_PROGRAMS = {"Russia": ["US-RUSHAR", "US-UKRRUS-REL"], "Venezuela": ["US-VEN"], "Iran": ["US-IRAN"]}
+
+# Region tabs on the supply-disruption strip
+SUPPLIER_REGIONS = {
+    **dict.fromkeys(["Iraq", "Saudi Arabia", "UAE", "Kuwait", "Qatar", "Oman"], "Middle East"),
+    **dict.fromkeys(["Russia", "Norway", "Azerbaijan", "Kazakhstan"], "Eurasia"),
+    **dict.fromkeys(["USA", "Brazil", "Mexico", "Colombia", "Guyana", "Venezuela", "Ecuador", "Canada"], "Americas"),
+    **dict.fromkeys(["Nigeria", "Angola", "Egypt", "Algeria", "Libya", "Sudan", "Cameroon", "Congo",
+                     "Equatorial Guinea", "Gabon"], "Africa"),
+    **dict.fromkeys(["Malaysia", "Australia"], "Asia / Pacific"),
+}
 
 CORRIDOR_CONFIG = {
     "Hormuz": {
@@ -62,7 +78,6 @@ CORRIDOR_CONFIG = {
         "query": "Hormuz (oil OR tanker OR maritime OR military OR Iran)",
         "lat": 26.56,
         "lng": 56.25,
-        "default_volume_mbpd": 2.35,
         "baseline_risk": 5.5,
         "notes": "Persian Gulf arterial corridor; high geopolitical sensitivity."
     },
@@ -72,7 +87,6 @@ CORRIDOR_CONFIG = {
         "query": '"Bab-el-Mandeb" OR ("Red Sea" (tanker OR Houthi OR missile OR drone))',
         "lat": 12.58,
         "lng": 43.33,
-        "default_volume_mbpd": 1.15,
         "baseline_risk": 7.0,
         "notes": "Southern Red Sea choke point; susceptible to drone/anti-ship missile strikes."
     },
@@ -82,7 +96,6 @@ CORRIDOR_CONFIG = {
         "query": '"Strait of Malacca" (oil OR shipping OR security OR piracy)',
         "lat": 4.21,
         "lng": 100.55,
-        "default_volume_mbpd": 0.80,
         "baseline_risk": 2.5,
         "notes": "Southeast Asia conduit linking Indian and Pacific Oceans; low conflict, piracy monitoring."
     },
@@ -92,7 +105,6 @@ CORRIDOR_CONFIG = {
         "query": '"Cape of Good Hope" (tanker OR reroute OR shipping OR weather)',
         "lat": -34.35,
         "lng": 18.47,
-        "default_volume_mbpd": 0.65,
         "baseline_risk": 2.0,
         "notes": "Open ocean long-haul bypass route (+14-17 days transit lag for Red Sea rerouting)."
     },
@@ -102,7 +114,6 @@ CORRIDOR_CONFIG = {
         "query": '"Suez Canal" (transit OR tanker OR fees OR blockage OR convoy)',
         "lat": 29.97,
         "lng": 32.55,
-        "default_volume_mbpd": 0.90,
         "baseline_risk": 4.0,
         "notes": "Northern Red Sea gateway to Mediterranean and Black Sea crude supplies."
     }
@@ -465,7 +476,8 @@ class RiskIntelligenceAgent:
         headlines evaluated by KrudeAi and any user-applied interactive adjustments.
         """
         headlines = self.fetch_all_live_headlines()
-        
+        exposure = db.get_corridor_exposure()
+
         results = []
         for corridor in CORRIDORS:
             cfg = CORRIDOR_CONFIG[corridor]
@@ -512,7 +524,7 @@ class RiskIntelligenceAgent:
                 "risk_score": risk_score,
                 "status": status,
                 "badge_class": badge_class,
-                "volume_mbpd": cfg["default_volume_mbpd"],
+                "volume_mbpd": exposure["corridors"][CHOKEPOINT_KEY[corridor]]["volume_at_risk_mbpd"],
                 "primary_suppliers": cfg["primary_suppliers"],
                 "headline": top_headline.get("title", ""),
                 "headline_source": top_headline.get("source"),
@@ -522,7 +534,9 @@ class RiskIntelligenceAgent:
                 "recent_headlines": corridor_headlines[:3]
             })
 
-        overall_risk = round(sum(r["risk_score"] * (r["volume_mbpd"] / 5.85) for r in results), 1)
+        # Exposure-weighted average (Suez and Bab-el-Mandeb share barrels, so weights are normalised)
+        total_w = sum(r["volume_mbpd"] for r in results) or 1.0
+        overall_risk = round(sum(r["risk_score"] * r["volume_mbpd"] for r in results) / total_w, 1)
         engines = sorted({h.get("model_used", "") for h in headlines} - {""})
 
         return {
@@ -539,9 +553,9 @@ class RiskIntelligenceAgent:
 
         1. News: stored live headlines (NewsAPI, GNews, GDELT incl. 42-day backfill), each scored
            0-10, run through RiskPipeline -> corridor P(disruption/30d) and 7-day momentum.
-        2. Sanctions: OFAC records per supplier country -> friction multiplier.
-        3. Infrastructure: pipeline bypass capacity (Petroline, Habshan-Fujairah, Kirkuk-Ceyhan, SUMED)
-           reduces how much of a corridor's risk reaches each supplier.
+        2. Routes: each supplier's 3-month trailing imports split across its routes by capacity; a route's
+           risk is 1 - prod(1 - P(chokepoint)), so bypass routes (Yanbu, Fujairah, Duqm) carry less risk.
+        3. Sanctions: OFAC records for the supplier country -> x1.15 friction multiplier.
         """
         now_utc = datetime.now(timezone.utc)
         today_str = now_utc.strftime("%Y-%m-%d")
@@ -551,13 +565,7 @@ class RiskIntelligenceAgent:
         # 1. CORRIDOR PROBABILITY from stored live headlines (dedupe -> decay -> aggregate -> momentum -> sanctions)
         corridors_summary = []
         corridor_p_map = {}
-        corridor_flow_desc = {
-            "Hormuz": "Arterial Inflow 2,598 kbd",
-            "Bab-el-Mandeb": "Red Sea Corridor 2,355 kbd",
-            "Suez": "Northbound Canal 900 kbd",
-            "Malacca": "Eastbound Conduit 800 kbd",
-            "Cape of Good Hope": "Open Ocean Long-Haul 650 kbd",
-        }
+        exposure = db.get_corridor_exposure()["corridors"]
 
         for corridor_name in CORRIDORS:
             res_today = pipeline.compute_corridor_probability(corridor_name, today_str)
@@ -582,118 +590,61 @@ class RiskIntelligenceAgent:
                 "active_events_count": res_today["active_events_count"],
                 "top_event": top["title"] if top else None,
                 "is_cape": corridor_name == "Cape of Good Hope",
-                "inflow_desc": corridor_flow_desc[corridor_name],
+                "exposure_kbd": exposure[CHOKEPOINT_KEY[corridor_name]]["volume_at_risk_kbd"],
+                "inflow_desc": f"{exposure[CHOKEPOINT_KEY[corridor_name]]['volume_at_risk_kbd']:,.0f} kbd of India's imports",
             })
 
-        # 2. RAW SUPPLIER MASTER DEFINITIONS (India Sovereign Import Basket: 18 Countries)
-        raw_suppliers = [
-            {"supplier": "Kuwait", "region": "Middle East", "primary_corridor": "Hormuz", "baseline_flow_kbd": 210.0, "bypass_mbpd": 0.0, "best_route": "100% Hormuz (No bypass)", "bypass_type": "none"},
-            {"supplier": "Saudi Arabia", "region": "Middle East", "primary_corridor": "Hormuz", "baseline_flow_kbd": 625.0, "bypass_mbpd": 5.0, "best_route": "East-West Petroline (Yanbu bypass)", "bypass_type": "petroline"},
-            {"supplier": "Iraq", "region": "Middle East", "primary_corridor": "Hormuz", "baseline_flow_kbd": 890.0, "bypass_mbpd": 0.5, "best_route": "Kirkuk-Ceyhan pipeline option", "bypass_type": "ceyhan"},
-            {"supplier": "Qatar", "region": "Middle East", "primary_corridor": "Hormuz", "baseline_flow_kbd": 85.0, "bypass_mbpd": 0.0, "best_route": "100% Hormuz (Ras Laffan)", "bypass_type": "none"},
-            {"supplier": "UAE", "region": "Middle East", "primary_corridor": "Hormuz", "baseline_flow_kbd": 420.0, "bypass_mbpd": 1.8, "best_route": "Habshan-Fujairah bypass (100%)", "bypass_type": "fujairah_100"},
-            {"supplier": "Oman", "region": "Middle East", "primary_corridor": "None", "baseline_flow_kbd": 110.0, "bypass_mbpd": 0.0, "best_route": "Mina Al Fahal / Duqm (Arabian Sea)", "bypass_type": "arabian_sea_open"},
-            {"supplier": "Russia", "region": "Eurasia", "primary_corridor": "Suez", "baseline_flow_kbd": 1750.0, "bypass_mbpd": 0.0, "best_route": "Cape / Kozmino Pacific route", "bypass_type": "multi_modal"},
-            {"supplier": "USA", "region": "Americas", "primary_corridor": "Cape of Good Hope", "baseline_flow_kbd": 250.0, "bypass_mbpd": 0.0, "best_route": "Atlantic / Cape open ocean", "bypass_type": "open_ocean"},
-            {"supplier": "Nigeria", "region": "Africa", "primary_corridor": "Cape of Good Hope", "baseline_flow_kbd": 180.0, "bypass_mbpd": 0.0, "best_route": "Gulf of Guinea / Cape route", "bypass_type": "open_ocean"},
-            {"supplier": "Angola", "region": "Africa", "primary_corridor": "Cape of Good Hope", "baseline_flow_kbd": 140.0, "bypass_mbpd": 0.0, "best_route": "South Atlantic / Cape route", "bypass_type": "open_ocean"},
-            {"supplier": "Brazil", "region": "Americas", "primary_corridor": "Cape of Good Hope", "baseline_flow_kbd": 120.0, "bypass_mbpd": 0.0, "best_route": "Santos Basin / Cape route", "bypass_type": "open_ocean"},
-            {"supplier": "Mexico", "region": "Americas", "primary_corridor": "Cape of Good Hope", "baseline_flow_kbd": 95.0, "bypass_mbpd": 0.0, "best_route": "Gulf of Mexico / Cape route", "bypass_type": "open_ocean"},
-            {"supplier": "Colombia", "region": "Americas", "primary_corridor": "Cape of Good Hope", "baseline_flow_kbd": 70.0, "bypass_mbpd": 0.0, "best_route": "Covenas / Cape route", "bypass_type": "open_ocean"},
-            {"supplier": "Norway", "region": "Eurasia", "primary_corridor": "Suez", "baseline_flow_kbd": 65.0, "bypass_mbpd": 0.0, "best_route": "North Sea / Cape route", "bypass_type": "flexible_atlantic"},
-            {"supplier": "Egypt", "region": "Africa", "primary_corridor": "Suez", "baseline_flow_kbd": 50.0, "bypass_mbpd": 2.5, "best_route": "SUMED Pipeline / Red Sea", "bypass_type": "sumed"},
-            {"supplier": "Guyana", "region": "Americas", "primary_corridor": "Cape of Good Hope", "baseline_flow_kbd": 45.0, "bypass_mbpd": 0.0, "best_route": "Liza FPSO / Cape route", "bypass_type": "open_ocean"},
-            {"supplier": "Algeria", "region": "Africa", "primary_corridor": "Suez", "baseline_flow_kbd": 40.0, "bypass_mbpd": 0.0, "best_route": "Mediterranean / Suez Canal", "bypass_type": "suez_dependent"},
-            {"supplier": "Malaysia", "region": "Asia / Pacific", "primary_corridor": "Malacca", "baseline_flow_kbd": 35.0, "bypass_mbpd": 0.0, "best_route": "Malacca Strait", "bypass_type": "malacca_short"}
-        ]
+        # 2. SUPPLIERS: real route flows (3-month trailing imports split across each supplier's routes by
+        #    capacity), each route's risk = 1 - prod(1 - P(chokepoint)), weighted by its share of the volume.
+        try:
+            from engine.twin_graph import ROUTE_FLOWS_SQL, CHOKEPOINT_NAMES
+        except ImportError:
+            from backend.engine.twin_graph import ROUTE_FLOWS_SQL, CHOKEPOINT_NAMES
+        by_country: Dict[str, List[Dict[str, Any]]] = {}
+        for r in db.query_duckdb(ROUTE_FLOWS_SQL):
+            by_country.setdefault(r["country"], []).append(r)
 
-        # 3. DYNAMIC MULTI-FACTOR CALCULATION (NEWS + SHIPPING + SANCTIONS + BYPASS)
         suppliers_result = []
-        for sup in raw_suppliers:
-            name = sup["supplier"]
-            corridor = sup["primary_corridor"]
-            flow_kbd = sup["baseline_flow_kbd"]
-            bypass_type = sup["bypass_type"]
-            
-            # A. Base corridor probability from live news
-            p_corr = corridor_p_map.get(corridor, 0.0)
-            
-            # B. Real Shipping Route Verification from DuckDB / SQLite
-            routes_data = db.get_routes(source=name)
-            transit_days = 0.0
-            distance_km = 0.0
-            if routes_data:
-                transit_days = routes_data[0].get("transit_days", 0.0)
-                distance_km = routes_data[0].get("distance_km", 0.0)
-            
-            # C. Real OFAC Sanctions Scrutiny Lookup
-            ofac_entities = db.get_ofac_entities(country=name)
-            ofac_count = len(ofac_entities)
-            
-            # Sanctions compliance friction multiplier:
-            # Shadow fleet tracking or OFAC sanctions adds +15% compliance and interdiction friction
-            if name in ["Russia", "Iran", "Venezuela"] or ofac_count > 0:
-                sanctions_mult = 1.15
-            else:
-                sanctions_mult = 1.00
-                
-            # D. Physical Vulnerability vs Infrastructure Bypass Factor
-            if bypass_type == "none":
-                vulnerability_factor = 1.00
-                reason = "Single maritime outlet; zero operational bypass pipeline to open water"
-            elif bypass_type == "petroline":
-                vulnerability_factor = 0.325
-                reason = "5.0 MBPD Petroline to Red Sea bypasses Hormuz arterial bottleneck"
-            elif bypass_type == "ceyhan":
-                vulnerability_factor = 0.320
-                reason = "Northern Kirkuk-Ceyhan pipeline option mitigates southern Basrah offshore terminal risk"
-            elif bypass_type == "fujairah_100":
-                vulnerability_factor = 0.00
-                reason = "Habshan-Fujairah pipeline feeds directly into Gulf of Oman, fully evading Hormuz"
-            elif bypass_type == "arabian_sea_open":
-                vulnerability_factor = 0.00
-                reason = "Geographically situated outside the Strait of Hormuz on the open Arabian Sea"
-            elif bypass_type == "multi_modal":
-                vulnerability_factor = 0.25
-                reason = "Multi-modal export architecture (Baltic, Black Sea, ESPO Pacific terminal)"
-            elif bypass_type == "sumed":
-                vulnerability_factor = 0.50
-                reason = "SUMED crude pipeline from Ain Sukhna to Sidi Kerir provides Red Sea / Med linkage"
-            elif bypass_type == "suez_dependent":
-                vulnerability_factor = 1.00
-                reason = "Mediterranean loading dependent on Suez transit"
-            elif bypass_type == "malacca_short":
-                vulnerability_factor = 1.00
-                reason = "Short-haul regional transit across Malacca / Andaman Sea"
-            else: # open_ocean
-                vulnerability_factor = 0.00
-                reason = "Deepwater Atlantic / Cape of Good Hope open ocean shipping unaffected by chokepoints"
-                
-            # E. Genuine Mathematical Synthesis
-            if corridor == "None" or vulnerability_factor == 0.0:
-                p_sup = 0.0000
-            else:
-                # Supply disruption prob = Corridor Risk * Vulnerability * Sanctions Friction
-                p_sup = round(min(0.98, max(0.0, p_corr * vulnerability_factor * sanctions_mult)), 4)
-                
-            at_risk = round(flow_kbd * p_sup)
-            
+        for name, routes in by_country.items():
+            flow_kbd = sum(float(r["kbd"] or 0) for r in routes)
+            if flow_kbd < 1.0:
+                continue
+            programs = SANCTIONS_PROGRAMS.get(name, [])
+            ofac_count = sum(len(db.query_duckdb("SELECT 1 FROM ofac WHERE program_ids LIKE ?", [f"%{prog}%"]))
+                             for prog in programs)
+            sanctions_mult = 1.15 if ofac_count > 0 else 1.00
+
+            route_rows, p_weighted, via = [], 0.0, {}
+            for r in routes:
+                corridors = [CHOKEPOINT_NAMES[c] for c in str(r["chokepoints"]).split("|") if c in CHOKEPOINT_NAMES]
+                p_safe = 1.0
+                for c in corridors:
+                    p_safe *= 1.0 - corridor_p_map.get(c, 0.0)
+                p_route = 1.0 - p_safe
+                share = float(r["kbd"] or 0) / flow_kbd
+                p_weighted += share * p_route
+                label = " + ".join(corridors) or "open sea"
+                via[label] = via.get(label, 0.0) + share
+                route_rows.append((p_route, r, label))
+
+            p_sup = round(min(0.98, p_weighted * sanctions_mult), 4)
+            safest = min(route_rows, key=lambda x: (x[0], -float(x[1]["kbd"] or 0)))
+            mix = ", ".join(f"{100 * s:.0f}% {k}" for k, s in sorted(via.items(), key=lambda x: -x[1]))
             suppliers_result.append({
                 "supplier": name,
-                "region": sup["region"],
+                "region": SUPPLIER_REGIONS.get(name, "Other"),
                 "p_supply_disruption": p_sup,
                 "p_display": f"{p_sup * 100:.1f}%",
                 "bar_pct": min(100, int(p_sup * 100 * 9)),  # full bar ~ 11%, the calibration maximum
-                "baseline_flow_kbd": flow_kbd,
-                "at_risk_kbd": at_risk,
-                "bypass_capacity_mbpd": sup["bypass_mbpd"],
-                "best_route": sup["best_route"],
-                "vulnerability_reason": reason,
-                "shipping_transit_days": transit_days,
-                "shipping_distance_km": distance_km,
+                "baseline_flow_kbd": round(flow_kbd),
+                "at_risk_kbd": round(flow_kbd * p_sup),
+                "best_route": f"Volume via {mix}",
+                "vulnerability_reason": f"Lowest-risk route: {safest[1]['load_port']} -> {safest[1]['discharge_port']} ({safest[2]})",
+                "shipping_transit_days": safest[1]["transit_days"],
                 "ofac_records_count": ofac_count,
-                "sanctions_friction_multiplier": sanctions_mult
+                "sanctions_friction_multiplier": sanctions_mult,
             })
+        suppliers_result.sort(key=lambda s: -s["baseline_flow_kbd"])
 
         return {
             "horizon": "30-day horizon",
@@ -701,13 +652,43 @@ class RiskIntelligenceAgent:
             "headlines_in_window": len(pipeline.headlines),
             "data_sources_active": [
                 "Live news: NewsAPI, GNews, GDELT (stored history, 45-day decay window)",
+                "India's imports by supplier (3-month trailing average) and route capacities",
                 "OFAC sanctions records (local snapshot)",
-                "Pipeline bypass capacities (static registry)",
             ],
             "corridors": corridors_summary,
             "suppliers": suppliers_result,
             "total_at_risk_kbd": sum(s["at_risk_kbd"] for s in suppliers_result),
             "total_import_covered_kbd": sum(s["baseline_flow_kbd"] for s in suppliers_result)
+        }
+
+    def get_threat_board(self, history_days: int = 30) -> Dict[str, Any]:
+        """Corridor Threat Board: live index per corridor, its pipeline stages, 30-day history and exposure."""
+        pipeline = self.pipeline
+        today = datetime.now(timezone.utc).date()
+        exposure = db.get_corridor_exposure()
+        corridors = []
+        for name in CORRIDORS:
+            stages = pipeline.explain_stages(name, today.isoformat())
+            history = []
+            for d in range(history_days - 1, -1, -1):
+                day = (today - timedelta(days=d)).isoformat()
+                r = pipeline.compute_corridor_probability(name, day)
+                history.append({"date": day, "risk_score": r["risk_score"]})
+            exp = exposure["corridors"][CHOKEPOINT_KEY[name]]
+            corridors.append({
+                "corridor": name,
+                **stages,
+                "delta_7d": round(stages["risk_score"] - history[-8]["risk_score"], 1) if len(history) >= 8 else 0.0,
+                "history": history,
+                "exposure_kbd": exp["volume_at_risk_kbd"],
+                "exposure_share_pct": exp["share_of_india_imports_pct"],
+            })
+        return {
+            "as_of": today.isoformat(),
+            "basis": "Stored live headlines (NewsAPI, GNews, GDELT) scored 0-10, run through dedupe -> 7-day "
+                     "half-life decay -> strongest event + damped corroboration -> momentum -> sanctions",
+            "history_headlines": len(pipeline.headlines),
+            "corridors": corridors,
         }
 
     def supplier_probability(self, corridor_scores: Optional[Dict[str, float]] = None) -> Dict[str, Any]:

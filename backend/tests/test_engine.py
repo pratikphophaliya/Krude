@@ -9,6 +9,7 @@ Validates:
 5. Live multi-criteria procurement orchestrator & landed cost optimizer.
 """
 
+import time
 import unittest
 import sys
 from pathlib import Path
@@ -218,8 +219,12 @@ class TestKrudeDigitalTwin(unittest.TestCase):
 
         self.assertGreater(p["Hormuz"], p["Malacca"])
         self.assertTrue(all(v <= 0.111 for v in p.values()), "must stay within the pipeline calibration")
-        self.assertGreater(sup["Kuwait"], sup["Saudi Arabia"], "no-bypass supplier is more exposed")
-        self.assertEqual(sup["UAE"], 0.0, "Habshan-Fujairah fully bypasses Hormuz")
+        # Risk follows each supplier's real route mix: all-Hormuz Kuwait > UAE (a third via Fujairah) > Oman (open sea)
+        self.assertGreater(sup["Kuwait"], sup["UAE"], "Fujairah routes lower UAE's exposure")
+        self.assertGreater(sup["UAE"], sup["Oman"])
+        self.assertEqual(sup["Oman"], 0.0, "Oman loads outside every chokepoint")
+        russia = next(s for s in res["suppliers"] if s["supplier"] == "Russia")
+        self.assertGreater(russia["ofac_records_count"], 0, "OFAC Russia programme records are matched")
 
         quiet = agent_with({}).calculate_supplier_probabilities()
         self.assertTrue(all(c["p_disruption_30d"] < 0.01 for c in quiet["corridors"]), "no news -> quiet floor")
@@ -282,6 +287,32 @@ class TestKrudeDigitalTwin(unittest.TestCase):
         self.assertEqual(red_sea["gap_days"], 12, "Red Sea cargoes reroute via the Cape (+12 days)")
         self.assertEqual(red_sea["gap_kbd_by_day"][12], 0.0)
         self.assertLess(red_sea["price_rise_usd"], hormuz["price_rise_usd"])
+
+    def test_threat_board_stages_reproduce_the_index(self):
+        """The board's stage values multiply out to the same index the pipeline reports."""
+        from engine.risk_pipeline import RiskPipeline
+        today = time.strftime("%Y-%m-%d")
+        pipe = RiskPipeline(headlines=[
+            {"date": today, "corridor": "Hormuz", "title": "Tanker seized", "raw_score": 8.0, "event_cluster": "a"},
+            {"date": today, "corridor": "Hormuz", "title": "Mines found", "raw_score": 6.0, "event_cluster": "b"},
+        ])
+        st = pipe.explain_stages("Hormuz", today)
+        full = pipe.compute_corridor_probability("Hormuz", today)
+        s, c = st["strongest_event"], st["corroboration"]
+        index = s + (1 - s) * c / (1 + c)
+        self.assertAlmostEqual(index, st["news_index"], places=3)
+        self.assertAlmostEqual(st["final_index"], full["p_disruption"], places=4)
+        self.assertAlmostEqual(st["p_disruption_30d"], full["p_disruption_30d"], places=4)
+
+    def test_twin_graph_flows_match_exposure(self):
+        """Route flows on the twin map add up to the corridor exposure used everywhere else."""
+        from engine.twin_graph import build_twin_graph
+        g = build_twin_graph(min_kbd=0.0)
+        self.assertEqual(g["ports_without_coordinates"], [])
+        exposure = db.get_corridor_exposure()["corridors"]
+        hormuz_routes = sum(r["kbd"] for r in g["routes"] if "Hormuz" in r["corridors"])
+        self.assertAlmostEqual(hormuz_routes, exposure["hormuz"]["volume_at_risk_kbd"], delta=1.0)
+        self.assertLessEqual(g["mapped_kbd"], g["total_imports_kbd"])
 
     def test_block4_reserve_lp_optimization(self):
         """SPR LP: draw limits, adaptive floor, gap covered first, consistent days-of-cover accounting."""

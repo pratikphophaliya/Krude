@@ -48,6 +48,7 @@ from engine.spr_optimiser import StrategicReserveOptimiser
 from engine.fine_tuning_adapter import AIModelManager
 from engine.live_poller import live_manager
 from engine.validation import validate
+from engine.twin_graph import build_twin_graph
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -255,6 +256,16 @@ def get_corridor_timeline(corridor: CorridorName = Query("Hormuz")):
         "data_points_count": len(ts),
         "timeline": ts
     }
+
+@app.get("/api/risk/threat-board")
+def get_threat_board():
+    """Corridor Threat Board: live index, pipeline stage values, 30-day history and import exposure."""
+    return risk_agent.get_threat_board()
+
+@app.get("/api/digital-twin/graph")
+def get_digital_twin_graph():
+    """Digital twin map: load ports -> chokepoints -> Indian discharge ports, with real route flows (kbd)."""
+    return build_twin_graph()
 
 @app.get("/api/risk/supply-disruption-probabilities")
 def get_supply_disruption_probabilities():

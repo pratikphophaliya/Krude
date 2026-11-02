@@ -202,20 +202,20 @@
           <div class="narrative-beat active-beat" id="beat-1" data-beat="dependency">
             <h2 class="beat-title">Total Maritime Dependency</h2>
             <p class="beat-lead">
-              India imports <strong class="text-white">88.2%</strong> of its crude oil requirements (5.405 MBPD).
+              India imports <strong class="text-white" id="story-import-share">…</strong> of the crude it refines (<span id="story-import-mbpd">…</span> MBPD, 3-month average).
             </p>
             <p class="beat-body">
               Every day, dozens of supertankers traverse contested international waterways from the Persian Gulf, Red
-              Sea, West Africa, and Russia to feed 23 domestic refineries.
+              Sea, West Africa, and Russia to feed India's 23 refineries.
             </p>
             <div class="beat-metric-strip">
               <div class="bm-item">
-                <span class="bm-val">5.405 MBPD</span>
+                <span class="bm-val" id="story-import-kbd">…</span>
                 <span class="bm-lbl">Daily Import Need</span>
               </div>
               <div class="bm-item">
                 <span class="bm-val">23</span>
-                <span class="bm-lbl">Coastal Refineries</span>
+                <span class="bm-lbl">Refineries</span>
               </div>
             </div>
           </div>
@@ -224,20 +224,19 @@
           <div class="narrative-beat" id="beat-2" data-beat="concentration">
             <h2 class="beat-title">Chokepoint Concentration</h2>
             <p class="beat-lead">
-              <strong class="text-amber">48.1%</strong> of all Indian crude sits behind a single 21-mile strait.
+              <strong class="text-amber" id="story-top-share">…</strong> of India's crude imports now pass <span id="story-top-name">…</span>.
             </p>
             <p class="beat-body">
-              2.598 MBPD flows exclusively through the Strait of Hormuz from Iraq, Saudi Arabia, UAE, Kuwait, and Qatar.
-              Another 43.6% relies on Bab-el-Mandeb and the Red Sea corridor.
+              <span id="story-concentration-body">Loading the latest import mix…</span>
             </p>
             <div class="beat-metric-strip">
               <div class="bm-item">
-                <span class="bm-val text-red">2,598 kbd</span>
+                <span class="bm-val text-red" id="story-hormuz-kbd">…</span>
                 <span class="bm-lbl">Hormuz Volume</span>
               </div>
               <div class="bm-item">
-                <span class="bm-val text-amber">2,355 kbd</span>
-                <span class="bm-lbl">Red Sea Volume</span>
+                <span class="bm-val text-amber" id="story-redsea-kbd">…</span>
+                <span class="bm-lbl">Bab-el-Mandeb Volume</span>
               </div>
             </div>
           </div>
@@ -364,7 +363,8 @@
 
       <div class="section-header-block">
         <h2 class="section-main-heading">Corridor Threat Board</h2>
-        <p class="section-sub-heading">Current threat index per chokepoint, with analyst signal tuning</p>
+        <p class="section-sub-heading">Live threat index per chokepoint from scored headlines, with a what-if on each pipeline stage</p>
+        <p class="section-sub-heading" id="threat-board-basis" style="font-size:0.8rem;opacity:0.7">Loading live index&hellip;</p>
       </div>
 
       <!-- Row of 5 Chokepoint Cards -->
@@ -380,10 +380,10 @@
               <svg class="radial-gauge-svg" viewBox="0 0 100 100">
                 <circle class="gauge-bg-ring" cx="50" cy="50" r="42" />
                 <circle class="gauge-bar-ring ring-white" cx="50" cy="50" r="42" stroke-dasharray="264"
-                  stroke-dashoffset="84" />
+                  stroke-dashoffset="264" />
               </svg>
               <div class="gauge-val-center">
-                <span class="gauge-big-num">6.8</span>
+                <span class="gauge-big-num">–</span>
                 <span class="gauge-max">/10</span>
               </div>
             </div>
@@ -393,8 +393,8 @@
             </div>
           </div>
           <div class="card-footer-stats">
-            <span>2,598 kbd at risk</span>
-            <span class="threat-pill threat-neutral">CRITICAL</span>
+            <span>Loading…</span>
+            <span class="threat-pill threat-neutral">…</span>
           </div>
         </div>
 
@@ -408,10 +408,10 @@
               <svg class="radial-gauge-svg" viewBox="0 0 100 100">
                 <circle class="gauge-bg-ring" cx="50" cy="50" r="42" />
                 <circle class="gauge-bar-ring ring-white" cx="50" cy="50" r="42" stroke-dasharray="264"
-                  stroke-dashoffset="118" />
+                  stroke-dashoffset="264" />
               </svg>
               <div class="gauge-val-center">
-                <span class="gauge-big-num">5.5</span>
+                <span class="gauge-big-num">–</span>
                 <span class="gauge-max">/10</span>
               </div>
             </div>
@@ -421,8 +421,8 @@
             </div>
           </div>
           <div class="card-footer-stats">
-            <span>2,355 kbd at risk</span>
-            <span class="threat-pill threat-neutral">MODERATE</span>
+            <span>Loading…</span>
+            <span class="threat-pill threat-neutral">…</span>
           </div>
         </div>
 
@@ -436,10 +436,10 @@
               <svg class="radial-gauge-svg" viewBox="0 0 100 100">
                 <circle class="gauge-bg-ring" cx="50" cy="50" r="42" />
                 <circle class="gauge-bar-ring ring-white" cx="50" cy="50" r="42" stroke-dasharray="264"
-                  stroke-dashoffset="158" />
+                  stroke-dashoffset="264" />
               </svg>
               <div class="gauge-val-center">
-                <span class="gauge-big-num">4.0</span>
+                <span class="gauge-big-num">–</span>
                 <span class="gauge-max">/10</span>
               </div>
             </div>
@@ -449,8 +449,8 @@
             </div>
           </div>
           <div class="card-footer-stats">
-            <span>900 kbd at risk</span>
-            <span class="threat-pill threat-neutral">MODERATE</span>
+            <span>Loading…</span>
+            <span class="threat-pill threat-neutral">…</span>
           </div>
         </div>
 
@@ -464,10 +464,10 @@
               <svg class="radial-gauge-svg" viewBox="0 0 100 100">
                 <circle class="gauge-bg-ring" cx="50" cy="50" r="42" />
                 <circle class="gauge-bar-ring ring-white" cx="50" cy="50" r="42" stroke-dasharray="264"
-                  stroke-dashoffset="211" />
+                  stroke-dashoffset="264" />
               </svg>
               <div class="gauge-val-center">
-                <span class="gauge-big-num">2.0</span>
+                <span class="gauge-big-num">–</span>
                 <span class="gauge-max">/10</span>
               </div>
             </div>
@@ -477,8 +477,8 @@
             </div>
           </div>
           <div class="card-footer-stats">
-            <span>800 kbd at risk</span>
-            <span class="threat-pill threat-neutral">LOW</span>
+            <span>Loading…</span>
+            <span class="threat-pill threat-neutral">…</span>
           </div>
         </div>
 
@@ -492,10 +492,10 @@
               <svg class="radial-gauge-svg" viewBox="0 0 100 100">
                 <circle class="gauge-bg-ring" cx="50" cy="50" r="42" />
                 <circle class="gauge-bar-ring ring-white" cx="50" cy="50" r="42" stroke-dasharray="264"
-                  stroke-dashoffset="232" />
+                  stroke-dashoffset="264" />
               </svg>
               <div class="gauge-val-center">
-                <span class="gauge-big-num">1.2</span>
+                <span class="gauge-big-num">–</span>
                 <span class="gauge-max">/10</span>
               </div>
             </div>
@@ -505,8 +505,8 @@
             </div>
           </div>
           <div class="card-footer-stats">
-            <span>650 kbd at risk</span>
-            <span class="threat-pill threat-neutral">LOW</span>
+            <span>Loading…</span>
+            <span class="threat-pill threat-neutral">…</span>
           </div>
         </div>
 
@@ -519,8 +519,8 @@
         <div class="weights-control-panel">
           <div class="panel-header-row">
             <div>
-              <h4 class="panel-title" id="weights-panel-title">Hormuz: Signal Sensitivity Sandbox</h4>
-              <p class="panel-sub">Adjust weights to test how the index responds. Does not affect the live probability model.</p>
+              <h4 class="panel-title" id="weights-panel-title">Hormuz: What-if on the live pipeline</h4>
+              <p class="panel-sub">Sliders start at the live values. Moving them recomputes the index with the same formulas as the backend.</p>
             </div>
             <button id="reset-weights-btn" class="reset-link-btn">Reset corridor</button>
           </div>
@@ -529,85 +529,87 @@
 
             <div class="slider-row">
               <div class="slider-labels">
-                <span class="sl-name">News & Kinetic Volume</span>
-                <span class="sl-val" id="val-weight-news">8.5</span>
+                <span class="sl-name">Strongest event today (score × decay)</span>
+                <span class="sl-val" id="val-weight-news">–</span>
               </div>
-              <input type="range" class="custom-slider" id="slider-news" min="0" max="10" step="0.1" value="8.5">
+              <input type="range" class="custom-slider" id="slider-news" min="0" max="10" step="0.1" value="0">
             </div>
 
             <div class="slider-row">
               <div class="slider-labels">
-                <span class="sl-name">Price & Freight Volatility</span>
-                <span class="sl-val" id="val-weight-price">6.2</span>
+                <span class="sl-name">Corroborating events (damped sum)</span>
+                <span class="sl-val" id="val-weight-price">–</span>
               </div>
-              <input type="range" class="custom-slider" id="slider-price" min="0" max="10" step="0.1" value="6.2">
+              <input type="range" class="custom-slider" id="slider-price" min="0" max="3" step="0.01" value="0">
             </div>
 
             <div class="slider-row">
               <div class="slider-labels">
-                <span class="sl-name">AIS Vessel Deviation</span>
-                <span class="sl-val" id="val-weight-vessel">5.8</span>
+                <span class="sl-name">Change in news index vs 7 days ago</span>
+                <span class="sl-val" id="val-weight-vessel">–</span>
               </div>
-              <input type="range" class="custom-slider" id="slider-vessel" min="0" max="10" step="0.1" value="5.8">
+              <input type="range" class="custom-slider" id="slider-vessel" min="-1" max="1" step="0.01" value="0">
             </div>
 
             <div class="slider-row">
               <div class="slider-labels">
-                <span class="sl-name">Sanctions & OFAC Pressure</span>
-                <span class="sl-val" id="val-weight-sanctions">5.3</span>
+                <span class="sl-name">Corridor sanctions multiplier</span>
+                <span class="sl-val" id="val-weight-sanctions">–</span>
               </div>
-              <input type="range" class="custom-slider" id="slider-sanctions" min="0" max="10" step="0.1" value="5.3">
+              <input type="range" class="custom-slider" id="slider-sanctions" min="1" max="1.3" step="0.01" value="0">
             </div>
 
           </div>
 
           <div class="weights-note">
-            <i class="fa-solid fa-circle-info"></i> Adjust weights to test how the index responds. Does not affect the live probability model.
+            <i class="fa-solid fa-circle-info"></i> What-if only: the live probabilities are unchanged unless you switch Procurement to "Corridor Threat Board" mode. "Reset corridor" restores the live values.
           </div>
         </div>
 
         <!-- Right: 4-Row Signal Breakdown for Selected Corridor -->
         <div class="signals-breakdown-panel">
           <div class="panel-header-row">
-            <h4 class="panel-title" id="breakdown-corridor-title">Hormuz: Signal Contribution Breakdown</h4>
+            <h4 class="panel-title" id="breakdown-corridor-title">Hormuz: How the index is built</h4>
           </div>
 
           <div class="signals-table">
             <div class="st-row st-header">
-              <span>Signal Stream</span>
-              <span>Raw Value</span>
-              <span>Weight</span>
-              <span class="text-right">Weighted Contribution</span>
+              <span>Pipeline stage</span>
+              <span>Input</span>
+              <span>Effect</span>
+              <span class="text-right">Index after (/10)</span>
             </div>
 
             <div class="st-row" id="sig-row-news">
-              <span class="st-stream"><i class="fa-regular fa-newspaper"></i> GDELT & Maritime Wire</span>
-              <span class="st-raw font-mono" id="raw-sig-news">8.5 / 10</span>
-              <span class="st-wt font-mono" id="wt-sig-news">0.35</span>
-              <span class="st-contrib font-mono text-right" id="contrib-sig-news">+2.98</span>
+              <span class="st-stream"><i class="fa-regular fa-newspaper"></i> Dedupe + 7-day decay</span>
+              <span class="st-raw font-mono" id="raw-sig-news">–</span>
+              <span class="st-wt font-mono" id="wt-sig-news">–</span>
+              <span class="st-contrib font-mono text-right" id="contrib-sig-news">–</span>
             </div>
 
             <div class="st-row" id="sig-row-price">
-              <span class="st-stream"><i class="fa-solid fa-chart-line"></i> Brent & War Risk Surcharge</span>
-              <span class="st-raw font-mono" id="raw-sig-price">6.2 / 10</span>
-              <span class="st-wt font-mono" id="wt-sig-price">0.25</span>
-              <span class="st-contrib font-mono text-right" id="contrib-sig-price">+1.55</span>
+              <span class="st-stream"><i class="fa-solid fa-layer-group"></i> Corroboration</span>
+              <span class="st-raw font-mono" id="raw-sig-price">–</span>
+              <span class="st-wt font-mono" id="wt-sig-price">–</span>
+              <span class="st-contrib font-mono text-right" id="contrib-sig-price">–</span>
             </div>
 
             <div class="st-row" id="sig-row-vessel">
-              <span class="st-stream"><i class="fa-solid fa-ship"></i> AIS Tanker Rerouting Lag</span>
-              <span class="st-raw font-mono" id="raw-sig-vessel">5.8 / 10</span>
-              <span class="st-wt font-mono" id="wt-sig-vessel">0.30</span>
-              <span class="st-contrib font-mono text-right" id="contrib-sig-vessel">+1.74</span>
+              <span class="st-stream"><i class="fa-solid fa-arrow-trend-up"></i> Momentum</span>
+              <span class="st-raw font-mono" id="raw-sig-vessel">–</span>
+              <span class="st-wt font-mono" id="wt-sig-vessel">–</span>
+              <span class="st-contrib font-mono text-right" id="contrib-sig-vessel">–</span>
             </div>
 
             <div class="st-row" id="sig-row-sanctions">
-              <span class="st-stream"><i class="fa-solid fa-shield-halved"></i> OFAC SDN Entity Scrutiny</span>
-              <span class="st-raw font-mono" id="raw-sig-sanctions">5.3 / 10</span>
-              <span class="st-wt font-mono" id="wt-sig-sanctions">0.10</span>
-              <span class="st-contrib font-mono text-right" id="contrib-sig-sanctions">+0.53</span>
+              <span class="st-stream"><i class="fa-solid fa-shield-halved"></i> Sanctions</span>
+              <span class="st-raw font-mono" id="raw-sig-sanctions">–</span>
+              <span class="st-wt font-mono" id="wt-sig-sanctions">–</span>
+              <span class="st-contrib font-mono text-right" id="contrib-sig-sanctions">–</span>
             </div>
           </div>
+          <p class="breakdown-result font-mono" id="breakdown-result"></p>
+          <ul class="breakdown-events" id="breakdown-top-events"></ul>
         </div>
 
       </div>
@@ -1047,16 +1049,17 @@
     <section id="digital-twin" class="section-container">
       <div class="section-header-block">
         <h2 class="section-main-heading">Maritime Supply Chain Digital Twin</h2>
-        <p class="section-sub-heading">Geographic NetworkX supply graph mapping origins &rarr; chokepoints &rarr; Indian
-          refinery discharge hubs & ISPRL caverns.</p>
+        <p class="section-sub-heading">India's real crude flows: load ports &rarr; chokepoints &rarr; Indian discharge
+          ports, sized by 3-month average imports. Trigger Cascade runs the scenario, procurement and reserve models
+          with the Scenario Modeller's severity and duration.</p>
       </div>
 
       <div class="twin-canvas-card">
         <div class="twin-toolbar">
           <div class="twin-legend">
             <span class="tl-node node-country">Origin Source</span>
-            <span class="tl-node node-choke">Chokepoint</span>
-            <span class="tl-node node-dest">Indian Refinery Terminal</span>
+            <span class="tl-node node-choke">Chokepoint (colour = live risk)</span>
+            <span class="tl-node node-dest">Indian Discharge Port</span>
             <span class="tl-node node-spr">ISPRL Cavern</span>
           </div>
 
@@ -1067,6 +1070,7 @@
               <option value="Bab-el-Mandeb">Bab-el-Mandeb</option>
               <option value="Suez">Suez Canal</option>
               <option value="Malacca">Malacca Strait</option>
+              <option value="Cape of Good Hope">Cape of Good Hope</option>
             </select>
             <button id="twin-propagate-btn" class="twin-btn"><i class="fa-solid fa-radiation"></i> Trigger
               Cascade</button>
@@ -1079,8 +1083,7 @@
           <svg id="twin-routes-svg" class="edges" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
           <div id="twin-markers-layer" class="map-markers-layer"></div>
           <div class="twin-status-overlay" id="twin-status-overlay">
-            <span id="twin-status-text">Ready · Decay factor: 0.60 per hop | Click Trigger Cascade to simulate
-              interdiction propagation</span>
+            <span id="twin-status-text">Loading live supply graph&hellip;</span>
           </div>
         </div>
       </div>

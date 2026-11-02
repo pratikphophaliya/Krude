@@ -1829,7 +1829,7 @@ body {
 
 .st-row {
     display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1.2fr;
+    grid-template-columns: 1.6fr 0.8fr 1.4fr 1fr;
     align-items: center;
     padding: 14px 16px;
     background: rgba(255, 255, 255, 0.02);
@@ -3968,4 +3968,23 @@ button:active, .strat-btn:active, .quick-sample-btn:active, .proc-mode-btn:activ
     color: var(--text-muted);
     line-height: 1.5;
     margin: 0 0 16px 0;
+}
+
+/* Threat board: result line and the events behind the index */
+.breakdown-result {
+    margin: 16px 0 8px;
+    font-size: 0.85rem;
+    color: var(--text-pure);
+}
+
+.breakdown-events {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+}
+
+.breakdown-events li + li {
+    margin-top: 4px;
 }

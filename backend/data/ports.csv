@@ -1,0 +1,71 @@
+port,kind,lat,lon
+Duqm,load,19.66,57.70
+Mina al Fahal,load,23.63,58.52
+North West Shelf,load,-20.58,116.78
+Kimanis,load,5.57,115.85
+Angra dos Reis (Buzios),load,-23.01,-44.32
+Tupi FPSO,load,-25.50,-42.80
+Covenas,load,9.42,-75.68
+Esmeraldas,load,0.99,-79.65
+Liza FPSO,load,8.00,-56.90
+Jose,load,10.10,-64.85
+Skikda,load,36.88,6.91
+Es Sider,load,30.63,18.35
+Zueitina,load,30.85,20.10
+Vancouver (TMX),load,49.29,-122.95
+Cayo Arcas,load,20.20,-91.98
+Beaumont,load,30.08,-94.10
+Corpus Christi,load,27.81,-97.40
+Houston (HSC),load,29.73,-95.27
+LOOP (Louisiana),load,28.88,-90.02
+Mongstad,load,60.81,5.03
+Basrah Oil Terminal,load,29.68,48.80
+Ceyhan (ITP pipeline),load,36.88,35.93
+Khor al-Amaya,load,29.78,48.80
+Al-Zour,load,28.72,48.38
+Mina al-Ahmadi,load,29.06,48.16
+Ras al-Khafji (Neutral Zone),load,28.42,48.50
+Halul Island,load,25.67,52.41
+Ras Laffan,load,25.92,51.58
+Ju'aymah,load,26.85,50.05
+Muajjiz,load,23.90,38.30
+Ras Tanura,load,26.64,50.16
+Yanbu (Red Sea),load,24.08,38.06
+Das Island,load,25.15,52.87
+Fujairah (ADCOP),load,25.17,56.36
+Jebel Dhanna,load,24.19,52.61
+Zirku Island,load,24.88,53.07
+Ras Gharib,load,28.36,33.10
+Port Sudan,load,19.60,37.22
+Ceyhan (BTC),load,36.85,35.93
+CPC Novorossiysk,load,44.66,37.62
+De-Kastri (Far East),load,51.47,140.78
+Kozmino (Far East),load,42.73,133.08
+Murmansk (Arctic),load,68.97,33.08
+Novorossiysk (Black Sea),load,44.72,37.78
+Prigorodnoye (Sakhalin),load,46.62,142.90
+Primorsk (Baltic),load,60.36,28.60
+Ust-Luga (Baltic),load,59.68,28.40
+Cabinda,load,-5.55,12.19
+Girassol FPSO,load,-7.80,12.30
+Plutonio FPSO,load,-7.20,11.90
+Kole,load,4.40,8.50
+Djeno,load,-4.93,11.85
+Zafiro FPSO,load,3.80,8.10
+Cape Lopez,load,-0.63,8.72
+Bonny,load,4.42,7.16
+Escravos,load,5.62,5.15
+Forcados,load,5.35,5.33
+Qua Iboe,load,4.55,8.00
+Jamnagar,discharge,22.47,70.06
+Vadinar,discharge,22.45,69.72
+Mundra,discharge,22.74,69.70
+Mangalore,discharge,12.91,74.85
+Kochi,discharge,9.93,76.26
+Paradip,discharge,20.26,86.67
+Chennai,discharge,13.10,80.30
+hormuz,chokepoint,26.56,56.25
+bab_el_mandeb,chokepoint,12.58,43.33
+suez,chokepoint,30.58,32.34
+malacca,chokepoint,1.43,102.89
+cape_of_good_hope,chokepoint,-34.35,18.47

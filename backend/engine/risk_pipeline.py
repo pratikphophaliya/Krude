@@ -554,6 +554,38 @@ class RiskPipeline:
             ]
         }
 
+    def explain_stages(self, corridor: str, target_date_str: str) -> Dict[str, Any]:
+        """Each stage's value for one corridor and date, so the dashboard can show how the index is built."""
+        target_dt = datetime.strptime(target_date_str, "%Y-%m-%d")
+        deduped = self.dedupe([h for h in self.headlines if h["corridor"].lower() == corridor.lower()])
+        now = self.apply_time_decay(deduped, target_dt)
+        week_ago = self.apply_time_decay(deduped, target_dt - timedelta(days=7))
+        ps = sorted((p for _, _, p in now), reverse=True)
+        strongest = ps[0] if ps else 0.0
+        corroboration = sum(p * (0.32 ** i) for i, p in enumerate(ps[1:], start=1))
+        index_now = self.strongest_event_damped_aggregation(now)
+        index_7d = self.strongest_event_damped_aggregation(week_ago)
+        after_momentum = self.apply_momentum(index_now, index_7d)
+        final = self.apply_sanctions(after_momentum, corridor)
+        p30, pclose = self.calculate_calibrated_30d_probabilities(final)
+        top = sorted(now, key=lambda e: -e[2])[:3]
+        return {
+            "headlines_in_window": len(now),
+            "strongest_event": round(strongest, 4),
+            "corroboration": round(corroboration, 4),
+            "news_index": index_now,
+            "news_index_7d_ago": index_7d,
+            "momentum_factor": round(after_momentum / index_now, 4) if index_now else 1.0,
+            "after_momentum": after_momentum,
+            "sanctions_multiplier": self.sanctions_multipliers.get(corridor, 1.0),
+            "final_index": final,
+            "risk_score": round(final * 10.0, 1),
+            "p_disruption_30d": p30,
+            "p_closure_30d": pclose,
+            "top_events": [{"title": e["title"], "date": e["date"], "source": e.get("source"),
+                            "raw_score": e["raw_score"], "weight_now": round(p, 3)} for e, _, p in top],
+        }
+
     def compute_18_month_timeseries(self, corridor: str = "Hormuz", step_days: int = 3) -> List[Dict[str, Any]]:
         """
         Generates daily/multi-day historical probability curve over the 18-24 month window:
