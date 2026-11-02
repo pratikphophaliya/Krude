@@ -1,278 +1,167 @@
 """
-Krude - Component 4: Strategic Reserve Linear Program (LP) Optimization
-=============================================================================
-Formulation:
-    minimise Σ (shortfall_t * VoLL + d_t * opportunity_cost)
-    s.t.     R_{t+1} = R_t - d_t
-             0 <= d_t <= SPR_MAX_DRAW_KBD
-             R_t >= R_min + P_hormuz * tail_gap    <-- Adaptive Geopolitical Buffer
-             shortfall_t >= net_deficit_t - d_t
-             shortfall_t >= 0
+Krude - Component 4: Strategic Reserve Optimisation
+===================================================
+LP (PuLP/CBC) for the daily SPR release against a scenario's supply-gap forecast:
 
-Connects 3 Modules:
-  1. Geopolitical Risk Engine (P_hormuz adaptive floor)
-  2. Disruption Scenario Engine (Gross blocked volume, duration T)
-  3. Maritime Logistics / Procurement Network (Cape rerouted cargoes landing at Day ~35)
+    minimise  sum_t  shortfall_t * (VoLL + small earlier-day tie-break) + d_t * opportunity_cost
+    s.t.      R_{t+1} = R_t - d_t
+              0 <= d_t <= max hydraulic draw
+              shortfall_t >= gap_t - d_t,  shortfall_t >= 0
+              R_t >= floor_days * cover_basis + P(follow-on disruption) * tail_gap   (adaptive floor)
+
+gap_t comes from the Disruption Scenario Modeller (it already includes rerouted cargo arrival),
+and P(follow-on) from the live corridor probability. "Days of cover" use one basis everywhere:
+the official 9.5 days for 39.47 MMbbl implies 4,155 kbd per day of cover.
+
+Fixed-rate policies (steady / aggressive / hold) are simulated with the same accounting.
 """
 
-from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-# Baseline constants (from assumptions.yaml)
-SPR_KB_DEFAULT = 39470.0            # Total ISPRL Phase I Capacity (39.47 Million Barrels)
-SPR_MAX_DRAW_KBD_DEFAULT = 450.0    # Maximum simultaneous hydraulic pump evacuation rate
-R_MIN_KB_DEFAULT = 12450.0          # Unbreachable cavern heel & strategic floor (~3.0 days)
-TAIL_GAP_KB_DEFAULT = 6400.0        # Expected post-crisis tail vulnerability buffer
-VOLL_DEFAULT = 200.0                # Value of Lost Load ($/barrel economic damage of unserved crude)
-OPPORTUNITY_COST_DEFAULT = 18.0     # Cost of depleting strategic reserve vs replacement ($/barrel)
+SPR_KB = 39470.0               # ISPRL Phase I capacity, thousand barrels (39.47 MMbbl)
+OFFICIAL_COVER_DAYS = 9.5      # ISPRL's published cover for that capacity
+COVER_BASIS_KBD = SPR_KB / OFFICIAL_COVER_DAYS   # ~4,155 kbd per day of cover
+MAX_DRAW_KBD = 450.0           # combined cavern evacuation rate (assumption, assumptions.yaml)
+TAIL_GAP_KB = 6400.0           # extra buffer held against a follow-on disruption
+VOLL_USD_BBL = 200.0           # value of lost load: economic damage of an unserved barrel
+OPPORTUNITY_COST_USD_BBL = 18.0  # cost of drawing (refill premium) vs keeping the barrel
+
+POLICIES = {
+    "steady": {"rate_kbd": 180.0, "label": "Steady release"},
+    "aggressive": {"rate_kbd": 350.0, "label": "Aggressive early release"},
+    "hold": {"rate_kbd": 65.0, "label": "Hold & conserve"},
+}
+
+
+def cover_days(kb: float) -> float:
+    return kb / COVER_BASIS_KBD
+
 
 class StrategicReserveOptimiser:
-    """
-    Component 4: Strategic Reserve LP Optimization Agent
-    Solves optimal daily SPR release trajectory over a multi-week crisis horizon.
-    """
+    """Component 4: SPR drawdown LP and fixed-policy simulation."""
+
     def __init__(self, data_dir: Optional[Path] = None):
-        self.current_reserve_days = 9.5  # Real, ISPRL Phase I baseline
         self.caverns = [
-            {"id": "VIZAG", "name": "Visakhapatnam SPR", "location": "Andhra Pradesh (East Coast)", "capacity_mbbl": 9.77, "share_pct": 25.0},
-            {"id": "MANGALORE", "name": "Mangalore SPR", "location": "Karnataka (West Coast)", "capacity_mbbl": 11.00, "share_pct": 28.1},
-            {"id": "PADUR", "name": "Padur SPR", "location": "Karnataka (West Coast)", "capacity_mbbl": 18.70, "share_pct": 46.9}
+            {"id": "VIZAG", "name": "Visakhapatnam SPR", "location": "Andhra Pradesh (East Coast)", "capacity_mbbl": 9.77},
+            {"id": "MANGALORE", "name": "Mangalore SPR", "location": "Karnataka (West Coast)", "capacity_mbbl": 11.00},
+            {"id": "PADUR", "name": "Padur SPR", "location": "Karnataka (West Coast)", "capacity_mbbl": 18.70},
         ]
 
-    def optimize_drawdown_lp(
-        self,
-        duration_days: int = 60,
-        gross_blocked_kbd: float = 1930.0,
-        p_hormuz: float = 0.88,
-        cape_arrival_day: int = 35,
-        cape_rerouted_kbd: float = 1100.0,
-        initial_spr_kb: float = SPR_KB_DEFAULT,
-        spr_max_draw_kbd: float = SPR_MAX_DRAW_KBD_DEFAULT,
-        r_min_kb: float = R_MIN_KB_DEFAULT,
-        tail_gap_kb: float = TAIL_GAP_KB_DEFAULT,
-        voll: float = VOLL_DEFAULT,
-        opportunity_cost: float = OPPORTUNITY_COST_DEFAULT
-    ) -> Dict[str, Any]:
-        """
-        Solves the Strategic Petroleum Reserve Linear Program (LP):
-        Minimizes unserved crude supply penalty while respecting hydraulic draw limits
-        and the adaptive geopolitical reserve floor.
-        """
-        T = max(10, int(duration_days))
-        
-        # 1. Build time-varying net deficit before SPR release
-        # Cape cargoes round the Cape of Good Hope (~32-38 days sailing lag from Atlantic/US Gulf)
-        net_deficits = []
-        rerouted_supplies = []
-        for t in range(1, T + 1):
-            if t < cape_arrival_day - 5:
-                # Pre-arrival: only minor regional pipeline/bypass reroutes (~150 kbd)
-                rerouted = 150.0
-            elif t <= cape_arrival_day + 5:
-                # Arrival ramp-up phase (Day 30 to Day 40)
-                fraction = (t - (cape_arrival_day - 5)) / 10.0
-                rerouted = 150.0 + fraction * (cape_rerouted_kbd - 150.0)
-            else:
-                # Post-arrival: Full alternative supply landed in India (~1,100 kbd)
-                rerouted = cape_rerouted_kbd
-            
-            rerouted = round(rerouted, 1)
-            deficit = max(0.0, gross_blocked_kbd - rerouted)
-            rerouted_supplies.append(rerouted)
-            net_deficits.append(deficit)
+    def optimize_drawdown_lp(self, net_deficit_kbd_by_day: List[float], p_followon: float,
+                             base_supply_kbd: float, safety_floor_days: float = 3.0,
+                             initial_spr_kb: float = SPR_KB) -> Dict[str, Any]:
+        T = len(net_deficit_kbd_by_day)
+        floor_kb = safety_floor_days * COVER_BASIS_KBD + p_followon * TAIL_GAP_KB
+        draws, shortfalls, solver, status = self._solve(net_deficit_kbd_by_day, initial_spr_kb, floor_kb)
 
-        # 2. Adaptive Reserve Floor: R_t >= R_min + P_hormuz * tail_gap
-        adaptive_floor_kb = round(r_min_kb + p_hormuz * tail_gap_kb, 1)
-        usable_budget_kb = max(0.0, initial_spr_kb - adaptive_floor_kb)
-
-        # 3. Solve Linear Program (PuLP with robust exact simplex fallback)
-        d_opt, shortfall_opt, R_opt = self._solve_lp(
-            T=T,
-            net_deficits=net_deficits,
-            initial_spr_kb=initial_spr_kb,
-            spr_max_draw_kbd=spr_max_draw_kbd,
-            adaptive_floor_kb=adaptive_floor_kb,
-            usable_budget_kb=usable_budget_kb,
-            voll=voll,
-            opportunity_cost=opportunity_cost
-        )
-
-        # 4. Generate daily profile & transmission stats
-        timeline = []
-        total_drawn_kb = 0.0
-        total_shortfall_kb = 0.0
-        base_demand_kbd = 5405.0
-
+        timeline, reserve = [], initial_spr_kb
         for t in range(T):
-            day_num = t + 1
-            gross_b = gross_blocked_kbd
-            reroute_s = rerouted_supplies[t]
-            net_d = net_deficits[t]
-            dt_val = d_opt[t]
-            rt_val = R_opt[t + 1]
-            shortfall_val = shortfall_opt[t]
-            avail_supply = round(base_demand_kbd - shortfall_val, 1)
-
-            total_drawn_kb += dt_val
-            total_shortfall_kb += shortfall_val
-
+            reserve -= draws[t]
             timeline.append({
-                "day": day_num,
-                "gross_blocked_kbd": gross_b,
-                "rerouted_cargoes_kbd": reroute_s,
-                "net_deficit_pre_spr_kbd": round(net_d, 1),
-                "spr_drawdown_kbd": round(dt_val, 1),
-                "remaining_spr_kb": round(rt_val, 1),
-                "remaining_spr_days": round(rt_val / (base_demand_kbd * 0.88), 2),
-                "unmet_shortfall_kbd": round(shortfall_val, 1),
-                "available_supply_kbd": avail_supply,
-                "cape_landed": (day_num >= cape_arrival_day)
+                "day": t + 1,
+                "net_deficit_pre_spr_kbd": round(net_deficit_kbd_by_day[t], 1),
+                "spr_drawdown_kbd": round(draws[t], 1),
+                "unmet_shortfall_kbd": round(shortfalls[t], 1),
+                "remaining_spr_kb": round(reserve, 1),
+                "remaining_spr_days": round(cover_days(reserve), 2),
+                "available_supply_kbd": round(base_supply_kbd - shortfalls[t], 1),
             })
 
-        peak_pre_spr_deficit = max(net_deficits)
-        peak_post_spr_deficit = max(shortfall_opt)
-        deficit_mitigation_pct = round(((peak_pre_spr_deficit - peak_post_spr_deficit) / peak_pre_spr_deficit) * 100.0, 1) if peak_pre_spr_deficit > 0 else 100.0
+        drawing_days = [p["day"] for p in timeline if p["spr_drawdown_kbd"] > 0.5]
+        at_max = sum(1 for d in draws if d >= MAX_DRAW_KBD - 0.5)
+        peak_pre, peak_post = max(net_deficit_kbd_by_day, default=0.0), max(shortfalls, default=0.0)
+        if drawing_days:
+            strategy = (f"Release on days {drawing_days[0]}-{drawing_days[-1]} ({at_max} days at the "
+                        f"{MAX_DRAW_KBD:.0f} kbd maximum); reserve ends at {cover_days(reserve):.1f} days of cover "
+                        f"against a {cover_days(floor_kb):.1f}-day adaptive floor.")
+        else:
+            strategy = "No release needed: the scenario creates no supply gap."
 
         return {
-            "optimization_model": "PuLP LP (Minimise VoLL Shortfall + Opportunity Cost)",
-            "status": "OPTIMAL",
+            "optimization_model": "Minimise VoLL x shortfall + opportunity cost x drawdown",
+            "solver": solver,
+            "status": status,
             "parameters": {
                 "duration_days": T,
-                "gross_blocked_kbd": gross_blocked_kbd,
-                "p_hormuz_threat": p_hormuz,
-                "cape_arrival_day": cape_arrival_day,
-                "cape_rerouted_kbd": cape_rerouted_kbd,
+                "p_followon_disruption": round(p_followon, 4),
+                "safety_floor_days": safety_floor_days,
+                "adaptive_reserve_floor_kb": round(floor_kb, 1),
                 "initial_spr_kb": initial_spr_kb,
-                "spr_max_draw_kbd": spr_max_draw_kbd,
-                "adaptive_reserve_floor_kb": adaptive_floor_kb,
-                "usable_spr_budget_kb": usable_budget_kb
+                "max_draw_kbd": MAX_DRAW_KBD,
+                "cover_basis_kbd": round(COVER_BASIS_KBD, 1),
+                "voll_usd_bbl": VOLL_USD_BBL,
+                "opportunity_cost_usd_bbl": OPPORTUNITY_COST_USD_BBL,
             },
             "summary": {
-                "total_spr_evacuated_kb": round(total_drawn_kb, 1),
-                "total_spr_evacuated_mbbl": round(total_drawn_kb / 1000.0, 2),
-                "final_remaining_spr_kb": round(R_opt[-1], 1),
-                "final_remaining_spr_days": round(R_opt[-1] / (base_demand_kbd * 0.88), 2),
-                "peak_deficit_pre_spr_kbd": round(peak_pre_spr_deficit, 1),
-                "peak_deficit_post_spr_kbd": round(peak_post_spr_deficit, 1),
-                "deficit_mitigation_pct": deficit_mitigation_pct,
-                "drawdown_strategy": (
-                    f"Front-loaded at maximum {spr_max_draw_kbd:.0f} kbd for days 1–{cape_arrival_day-3}, "
-                    f"then smoothly tapering to 0 kbd as Atlantic/Cape of Good Hope cargoes land around day {cape_arrival_day}."
-                )
+                "total_spr_evacuated_kb": round(sum(draws), 1),
+                "total_spr_evacuated_mbbl": round(sum(draws) / 1000.0, 2),
+                "final_remaining_spr_kb": round(reserve, 1),
+                "final_remaining_spr_days": round(cover_days(reserve), 2),
+                "unmet_shortfall_total_kb": round(sum(shortfalls), 1),
+                "peak_deficit_pre_spr_kbd": round(peak_pre, 1),
+                "peak_deficit_post_spr_kbd": round(peak_post, 1),
+                "deficit_mitigation_pct": round(100.0 * (peak_pre - peak_post) / peak_pre, 1) if peak_pre else 100.0,
+                "drawdown_strategy": strategy,
             },
-            "timeline": timeline
+            "timeline": timeline,
         }
 
-    def _solve_lp(
-        self,
-        T: int,
-        net_deficits: List[float],
-        initial_spr_kb: float,
-        spr_max_draw_kbd: float,
-        adaptive_floor_kb: float,
-        usable_budget_kb: float,
-        voll: float,
-        opportunity_cost: float
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """Solves the LP using PuLP with fallback to exact analytic simplex solver."""
-        # Try solving with PuLP if installed
+    def _solve(self, gaps: List[float], initial_kb: float, floor_kb: float):
+        """PuLP/CBC; if PuLP is unavailable or fails, a greedy earliest-day-first draw (labelled)."""
+        T = len(gaps)
         try:
             import pulp
-            prob = pulp.LpProblem("Reserve_Drawdown_LP", pulp.LpMinimize)
-            
-            d_vars = [pulp.LpVariable(f"d_{t}", lowBound=0, upBound=spr_max_draw_kbd) for t in range(T)]
-            shortfall_vars = [pulp.LpVariable(f"shortfall_{t}", lowBound=0) for t in range(T)]
-            R_vars = [pulp.LpVariable(f"R_{t}", lowBound=adaptive_floor_kb) for t in range(T + 1)]
-
-            # Objective: min sum(shortfall_t * VoLL_t + d_t * opportunity_cost)
-            # VoLL incorporates temporal priority (immediate refinery run-cuts on early days carry highest urgency)
-            prob += pulp.lpSum([
-                shortfall_vars[t] * (voll + 0.05 * (T - t)) + d_vars[t] * opportunity_cost
-                for t in range(T)
-            ])
-
-            # Initial inventory
-            prob += (R_vars[0] == initial_spr_kb)
-
+            prob = pulp.LpProblem("spr_drawdown", pulp.LpMinimize)
+            d = [pulp.LpVariable(f"d_{t}", lowBound=0, upBound=MAX_DRAW_KBD) for t in range(T)]
+            s = [pulp.LpVariable(f"s_{t}", lowBound=0) for t in range(T)]
+            R = [pulp.LpVariable(f"R_{t}", lowBound=floor_kb) for t in range(T + 1)]
+            # Small decreasing term breaks ties toward covering earlier days first
+            prob += pulp.lpSum(s[t] * (VOLL_USD_BBL + 0.05 * (T - t)) + d[t] * OPPORTUNITY_COST_USD_BBL for t in range(T))
+            prob += R[0] == initial_kb
             for t in range(T):
-                # R_{t+1} = R_t - d_t
-                prob += (R_vars[t + 1] == R_vars[t] - d_vars[t])
-                # shortfall_t >= net_deficit_t - d_t
-                prob += (shortfall_vars[t] >= net_deficits[t] - d_vars[t])
-
-            solver = pulp.PULP_CBC_CMD(msg=False)
-            prob.solve(solver)
-
-            if pulp.LpStatus[prob.status] == "Optimal":
-                d_res = [float(pulp.value(d_vars[t])) for t in range(T)]
-                shortfall_res = [float(pulp.value(shortfall_vars[t])) for t in range(T)]
-                R_res = [float(pulp.value(R_vars[t])) for t in range(T + 1)]
-                return d_res, shortfall_res, R_res
+                prob += R[t + 1] == R[t] - d[t]
+                prob += s[t] >= gaps[t] - d[t]
+            prob.solve(pulp.PULP_CBC_CMD(msg=False))
+            status = pulp.LpStatus[prob.status]
+            if status == "Optimal":
+                return [d[t].value() or 0.0 for t in range(T)], [s[t].value() or 0.0 for t in range(T)], "PuLP CBC linear program", status
         except Exception:
             pass
 
-        # Exact Analytic Simplex Method for Single-Storage LP
-        # Since VoLL ($200) >> Opportunity Cost ($18), optimum prioritizes high-deficit days (front-loaded)
-        # subject to cumulative draw <= usable_budget_kb and d_t <= spr_max_draw_kbd
-        d_res = []
-        shortfall_res = []
-        R_res = [initial_spr_kb]
-        curr_R = initial_spr_kb
+        draws, shortfalls, reserve = [], [], initial_kb
+        for gap in gaps:
+            draw = max(0.0, min(gap, MAX_DRAW_KBD, reserve - floor_kb))
+            reserve -= draw
+            draws.append(draw)
+            shortfalls.append(gap - draw)
+        return draws, shortfalls, "Greedy earliest-day-first (PuLP unavailable)", "HEURISTIC"
 
-        for t in range(T):
-            max_possible_draw = max(0.0, curr_R - adaptive_floor_kb)
-            target_draw = min(net_deficits[t], spr_max_draw_kbd)
-            actual_draw = min(target_draw, max_possible_draw)
-
-            d_res.append(actual_draw)
-            shortfall_res.append(max(0.0, net_deficits[t] - actual_draw))
-            curr_R -= actual_draw
-            R_res.append(curr_R)
-
-        return d_res, shortfall_res, R_res
-
-    def calculate_drawdown(
-        self,
-        safety_floor_days: float = 3.0,
-        disruption_duration_days: int = 30
-    ) -> Dict[str, Any]:
-        """
-        Legacy simple drawdown wrapper for backward compatibility.
-        """
-        safety_floor = max(0.0, min(self.current_reserve_days - 0.5, float(safety_floor_days)))
-        duration = max(1, int(disruption_duration_days))
-
-        usable_reserve_days = max(0.0, self.current_reserve_days - safety_floor)
-        max_daily_drawdown_days = round(usable_reserve_days / duration, 3)
-        daily_release_mbpd = round(max_daily_drawdown_days * 4.75, 2)
-        total_released_mbbl = round(daily_release_mbpd * duration, 2)
-
-        cavern_releases = []
-        for cav in self.caverns:
-            share = cav["share_pct"] / 100.0
-            cav_daily = round(daily_release_mbpd * share, 3)
-            cavern_releases.append({
-                "name": cav["name"],
-                "location": cav["location"],
-                "capacity_mbbl": cav["capacity_mbbl"],
-                "daily_discharge_mbpd": cav_daily,
-                "share_pct": cav["share_pct"]
-            })
-
+    def simulate_policies(self, horizon_days: int = 90, safety_floor_days: float = 3.0,
+                          initial_spr_kb: float = SPR_KB) -> Dict[str, Any]:
+        """Days of cover over time for fixed release rates, stopping at the safety floor."""
+        floor_kb = safety_floor_days * COVER_BASIS_KBD
+        out = {}
+        for key, p in POLICIES.items():
+            reserve, curve, exhausted_day = initial_spr_kb, [], None
+            for day in range(1, horizon_days + 1):
+                reserve = max(floor_kb, reserve - p["rate_kbd"])
+                if exhausted_day is None and reserve <= floor_kb:
+                    exhausted_day = day
+                curve.append(round(cover_days(reserve), 2))
+            days_to_floor = (initial_spr_kb - floor_kb) / p["rate_kbd"]
+            out[key] = {
+                **p,
+                "days_to_floor": round(days_to_floor, 1),
+                "floor_reached_within_horizon": exhausted_day is not None,
+                "cover_days_curve": curve,
+                "verdict": (f"Releasing {p['rate_kbd']:.0f} kbd draws the reserve from {OFFICIAL_COVER_DAYS} to the "
+                            f"{safety_floor_days:.1f}-day floor in {days_to_floor:.0f} days."),
+            }
         return {
-            "component_label": "Simulated — simple formula, stated assumptions",
-            "current_reserve_days": self.current_reserve_days,
-            "current_reserve_days_is_real": True,
-            "safety_floor_days": safety_floor,
-            "disruption_duration_days": duration,
-            "usable_reserve_days": round(usable_reserve_days, 2),
-            "max_daily_drawdown_days": max_daily_drawdown_days,
-            "daily_release_mbpd_equiv": daily_release_mbpd,
-            "total_released_mbbl": total_released_mbbl,
-            "cavern_breakdown": cavern_releases,
-            "advisory": (
-                f"With a {safety_floor:.1f}-day inviolable safety floor across 9.5 days of baseline reserve, "
-                f"{usable_reserve_days:.1f} days of crude buffer can be released over a {duration}-day crisis "
-                f"at a maximum rate of {max_daily_drawdown_days:.3f} reserve-days/day (~{daily_release_mbpd:.2f} MBPD)."
-            )
+            "initial_cover_days": round(cover_days(initial_spr_kb), 2),
+            "safety_floor_days": safety_floor_days,
+            "cover_basis_kbd": round(COVER_BASIS_KBD, 1),
+            "horizon_days": horizon_days,
+            "policies": out,
         }

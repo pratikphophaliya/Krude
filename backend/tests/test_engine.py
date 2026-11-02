@@ -271,39 +271,26 @@ class TestKrudeDigitalTwin(unittest.TestCase):
         self.assertGreater(len(bypass), 20)
 
     def test_block4_reserve_lp_optimization(self):
-        """
-        Validates Block 4 Strategic Petroleum Reserve LP Optimization:
-        - Minimizes shortfall VoLL + opportunity cost
-        - R_{t+1} = R_t - d_t
-        - 0 <= d_t <= SPR_MAX_DRAW_KBD (450 kbd)
-        - Adaptive safety floor R_t >= R_min + P_hormuz * tail_gap
-        - Front-loaded drawdown tapering around Day 35 as Cape cargoes arrive
-        """
-        from engine.spr_optimiser import StrategicReserveOptimiser
-        spr = StrategicReserveOptimiser(self.data_dir)
-        res = spr.optimize_drawdown_lp(
-            duration_days=60,
-            gross_blocked_kbd=1930.0,
-            p_hormuz=0.88,
-            cape_arrival_day=35,
-            cape_rerouted_kbd=1100.0
-        )
-        self.assertEqual(res["status"], "OPTIMAL")
+        """SPR LP: draw limits, adaptive floor, gap covered first, consistent days-of-cover accounting."""
+        from engine.spr_optimiser import StrategicReserveOptimiser, MAX_DRAW_KBD, COVER_BASIS_KBD, SPR_KB, TAIL_GAP_KB
+        spr = StrategicReserveOptimiser()
+        gaps = [800.0] * 20 + [0.0] * 40
+        res = spr.optimize_drawdown_lp(gaps, p_followon=0.10, base_supply_kbd=5600.0)
+        self.assertEqual(res["status"], "Optimal")
         self.assertEqual(len(res["timeline"]), 60)
-        
-        # Test 1: Hydraulic Drawdown Bound (<= 450 kbd)
+
+        floor_kb = 3.0 * COVER_BASIS_KBD + 0.10 * TAIL_GAP_KB
         for p in res["timeline"]:
-            self.assertGreaterEqual(p["spr_drawdown_kbd"], 0.0)
-            self.assertLessEqual(p["spr_drawdown_kbd"], 450.0 + 1e-5)
-            self.assertGreaterEqual(p["remaining_spr_kb"], 18000.0) # Adaptive floor check
-        
-        # Test 2: Front-loaded drawdown on early crisis days
-        early_draws = [p["spr_drawdown_kbd"] for p in res["timeline"][:20]]
-        self.assertTrue(all(d == 450.0 for d in early_draws), "Early days must draw at maximum capacity")
-        
-        # Test 3: Tapering around and after day 35
-        late_draws = [p["spr_drawdown_kbd"] for p in res["timeline"][40:]]
-        self.assertLess(sum(late_draws), sum(early_draws), "Drawdown must taper as Cape cargoes arrive")
+            self.assertLessEqual(p["spr_drawdown_kbd"], MAX_DRAW_KBD + 1e-6)
+            self.assertGreaterEqual(p["remaining_spr_kb"], floor_kb - 1e-3)
+        self.assertTrue(all(p["spr_drawdown_kbd"] == MAX_DRAW_KBD for p in res["timeline"][:20]), "draw at max while short")
+        self.assertTrue(all(p["spr_drawdown_kbd"] == 0.0 for p in res["timeline"][20:]), "no draw once the gap closes")
+        self.assertAlmostEqual(res["timeline"][19]["unmet_shortfall_kbd"], 350.0, delta=0.1)
+        self.assertAlmostEqual(SPR_KB / COVER_BASIS_KBD, 9.5, places=6)
+
+        policies = spr.simulate_policies(horizon_days=200)["policies"]
+        self.assertAlmostEqual(policies["steady"]["days_to_floor"], (SPR_KB - 3.0 * COVER_BASIS_KBD) / 180.0, delta=0.1)
+        self.assertLess(policies["aggressive"]["days_to_floor"], policies["steady"]["days_to_floor"])
 
     def test_block5_live_poller_engine(self):
         """

@@ -1162,64 +1162,46 @@ async function executeScenario() {
   set("wf-val-gdp", `${i.gdp_impact_pp.toFixed(3)} pp`);
   set("sim-explanation", res.explanation);
 
-  renderSupplyGapChart(duration, gapKbd);
+  renderSupplyGapChart(corridor, duration, severityPct);
 }
 
-async function renderSupplyGapChart(days, gapKbd) {
+async function renderSupplyGapChart(corridor, days, severityPct) {
   const canvas = document.getElementById("supply-gap-chart");
   if (!canvas || typeof Chart === "undefined") return;
 
-  if (supplyGapChartInst) supplyGapChartInst.destroy();
-
-  const T = Math.max(10, Math.min(days, 60));
-  const labels = Array.from({ length: T }, (_, i) => `Day ${i + 1}`);
-  const baseDemand = Array(T).fill(5405);
-
-  let sprDrawdown = [];
-  let available = [];
-  let remainingSprDays = [];
-
+  // The reserve LP runs against the scenario model's day-by-day gap (no browser-side fallback)
+  let data;
   try {
     const res = await fetch("/api/reserve/optimize-lp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        duration_days: T,
-        gross_blocked_kbd: gapKbd || 1930.0,
-        p_hormuz: 0.88,
-        cape_arrival_day: 35,
-        cape_rerouted_kbd: 1100.0
+        corridor,
+        disruption_duration_days: days,
+        disruption_severity_pct: severityPct
       })
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.timeline && data.timeline.length > 0) {
-        available = data.timeline.map(p => p.available_supply_kbd);
-        sprDrawdown = data.timeline.map(p => p.spr_drawdown_kbd);
-        remainingSprDays = data.timeline.map(p => p.remaining_spr_days);
-        const cover = document.getElementById("res-days-cover");
-        if (cover) cover.textContent = `${remainingSprDays[remainingSprDays.length - 1].toFixed(1)} days`;
-      }
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
   } catch (err) {
-    console.warn("Using offline Reserve LP curve calculation:", err);
+    console.warn("Reserve LP unavailable:", err);
+    return;
   }
 
-  // Fallback if API did not return array
-  if (available.length === 0) {
-    let currSpr = 39470.0;
-    const adaptiveFloor = 12450.0 + 0.88 * 6400.0; // ~18,082 kb
-    for (let t = 1; t <= T; t++) {
-      const rerouted = t < 30 ? 150 : (t <= 40 ? 150 + ((t - 30) / 10.0) * 950 : 1100);
-      const netDeficit = Math.max(0, (gapKbd || 1930) - rerouted);
-      const maxDraw = Math.max(0, currSpr - adaptiveFloor);
-      const draw = Math.min(450.0, netDeficit, maxDraw);
-      currSpr -= draw;
-      sprDrawdown.push(draw);
-      available.push(Math.round(5405 - (netDeficit - draw)));
-      remainingSprDays.push(+(currSpr / (5405 * 0.88)).toFixed(2));
-    }
-  }
+  if (supplyGapChartInst) supplyGapChartInst.destroy();
+  const T = data.timeline.length;
+  const labels = data.timeline.map(p => `Day ${p.day}`);
+  const baseSupply = data.scenario.india_crude_runs_kbd;
+  const baseDemand = Array(T).fill(baseSupply);
+  const available = data.timeline.map(p => p.available_supply_kbd);
+  const sprDrawdown = data.timeline.map(p => p.spr_drawdown_kbd);
+  const remainingSprDays = data.timeline.map(p => p.remaining_spr_days);
+  const lowest = Math.min(...available);
+
+  const cover = document.getElementById("res-days-cover");
+  if (cover) cover.textContent = `${remainingSprDays[T - 1].toFixed(1)} days`;
+  const strategyEl = document.getElementById("spr-lp-strategy");
+  if (strategyEl) strategyEl.textContent = `${data.summary.drawdown_strategy} (${data.solver})`;
 
   supplyGapChartInst = new Chart(canvas, {
     type: "line",
@@ -1227,7 +1209,7 @@ async function renderSupplyGapChart(days, gapKbd) {
       labels: labels,
       datasets: [
         {
-          label: "Baseline Demand (5,405 kbd)",
+          label: `Normal crude runs (${Math.round(baseSupply).toLocaleString()} kbd)`,
           data: baseDemand,
           borderColor: "rgba(255, 255, 255, 0.4)",
           borderDash: [4, 4],
@@ -1236,17 +1218,14 @@ async function renderSupplyGapChart(days, gapKbd) {
           yAxisID: "ySupply"
         },
         {
-          label: "Net Available Supply (with LP Draw + Cape Arrivals)",
+          label: "Available supply after SPR release",
           data: available,
           borderColor: "#10B981",
           backgroundColor: "rgba(239, 68, 68, 0.20)",
           fill: "-1",
           borderWidth: 2.5,
           tension: 0.2,
-          pointRadius: (ctx) => ctx.dataIndex === 34 ? 6 : 0,
-          pointBackgroundColor: "#3B82F6",
-          pointBorderColor: "#FFFFFF",
-          pointBorderWidth: 2,
+          pointRadius: 0,
           yAxisID: "ySupply"
         },
         {
@@ -1279,12 +1258,7 @@ async function renderSupplyGapChart(days, gapKbd) {
           borderWidth: 1,
           padding: 10,
           callbacks: {
-            footer: function (tooltipItems) {
-              const idx = tooltipItems[0].dataIndex;
-              if (idx === 34) return "⚓ Day 35: Cape of Good Hope VLCC Cargoes Land (+1,100 kbd) · SPR Tapers to 0";
-              if (idx < 32) return "⚡ Days 1–32: Strategic Reserve Front-Loaded Drawdown (450 kbd max)";
-              return "";
-            }
+            footer: (items) => `SPR cover left: ${remainingSprDays[items[0].dataIndex].toFixed(1)} days`
           }
         }
       },
@@ -1293,8 +1267,8 @@ async function renderSupplyGapChart(days, gapKbd) {
         ySupply: {
           type: "linear",
           position: "left",
-          min: 3000,
-          max: 6000,
+          min: Math.floor((lowest - 300) / 500) * 500,
+          max: Math.ceil((baseSupply + 200) / 500) * 500,
           ticks: { color: "#10B981" },
           grid: { color: "rgba(255,255,255,0.05)" },
           title: {
@@ -1308,7 +1282,7 @@ async function renderSupplyGapChart(days, gapKbd) {
           type: "linear",
           position: "right",
           min: 0,
-          max: 1200,
+          max: 1000,
           ticks: { color: "#F59E0B" },
           grid: { drawOnChartArea: false },
           title: {
@@ -1443,200 +1417,151 @@ function initProcurementList() {
 let reserveChartInst = null;
 let activeReserveStrategy = "steady";
 
-const STRATEGY_DATA = {
-  steady: {
-    rate: "180 kbd",
-    rateSub: "Linear Release Strategy",
-    days: "9.5 Days",
-    exhaust: "52 Days",
-    exhaustSub: "Until 3.0-day buffer reached",
-    verdict: "Steady drawdown at 180 kbd holds sovereign cover above 3.0-day emergency safety floor through day 52.",
-    curve: (d) => Math.max(3.0, 9.5 - (d * 0.125) + (d > 40 ? 0.05 : 0))
-  },
-  aggressive: {
-    rate: "350 kbd",
-    rateSub: "Front-Loaded Price Arrest",
-    days: "9.5 Days",
-    exhaust: "28 Days",
-    exhaustSub: "Until 3.0-day buffer reached",
-    verdict: "Aggressive front-loaded release at 350 kbd arrests domestic price shock but depletes reserve to critical 3.0-day floor by day 28.",
-    curve: (d) => Math.max(3.0, 9.5 - (d * 0.232))
-  },
-  hold: {
-    rate: "65 kbd",
-    rateSub: "Critical Defense Baseline",
-    days: "9.5 Days",
-    exhaust: "140+ Days",
-    exhaustSub: "Extended Sovereign Survival",
-    verdict: "Hold & Conserve policy rations SPR release to 65 kbd baseline, extending sovereign crude buffer beyond 140 days.",
-    curve: (d) => Math.max(3.0, 9.5 - (d * 0.046))
-  }
-};
+let reservePolicies = null;  // from /api/reserve/policies
+let reserveLpCurve = null;   // days-of-cover curve from the LP, when synced
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
 
 function updateReserveUI(stratKey) {
-  const info = STRATEGY_DATA[stratKey] || STRATEGY_DATA.steady;
-
-  const rateEl = document.getElementById("spr-stat-rate");
-  if (rateEl) rateEl.textContent = info.rate;
-
-  const rateSubEl = document.getElementById("spr-stat-rate-sub");
-  if (rateSubEl) rateSubEl.textContent = info.rateSub;
-
-  const daysEl = document.getElementById("spr-stat-days");
-  if (daysEl) daysEl.textContent = info.days;
-
-  const exhaustEl = document.getElementById("spr-stat-exhaust");
-  if (exhaustEl) exhaustEl.textContent = info.exhaust;
-
-  const exhaustSubEl = document.getElementById("spr-stat-exhaust-sub");
-  if (exhaustSubEl) exhaustSubEl.textContent = info.exhaustSub;
-
-  const verdictEl = document.getElementById("reserve-verdict-text");
-  if (verdictEl) verdictEl.textContent = info.verdict;
-
+  if (!reservePolicies) return;
+  const p = reservePolicies.policies[stratKey];
+  setText("spr-stat-rate", `${p.rate_kbd} kbd`);
+  setText("spr-stat-rate-sub", p.label);
+  setText("spr-stat-days", `${reservePolicies.initial_cover_days.toFixed(1)} Days`);
+  setText("spr-stat-exhaust", `${Math.round(p.days_to_floor)} Days`);
+  setText("spr-stat-exhaust-sub", `Until ${reservePolicies.safety_floor_days.toFixed(1)}-day floor reached`);
+  setText("reserve-verdict-text", p.verdict);
   renderReserveChart(stratKey);
 }
 
-function renderReserveChart(activeKey = "steady") {
+function renderReserveChart(activeKey) {
   const canvas = document.getElementById("reserve-chart");
-  if (!canvas || typeof Chart === "undefined") return;
-
+  if (!canvas || typeof Chart === "undefined" || !reservePolicies) return;
   if (reserveChartInst) reserveChartInst.destroy();
 
-  const days = Array.from({ length: 90 }, (_, i) => i + 1);
-  const labels = days.map(d => `Day ${d}`);
-
-  const steadyLine = days.map(d => STRATEGY_DATA.steady.curve(d));
-  const aggLine = days.map(d => STRATEGY_DATA.aggressive.curve(d));
-  const holdLine = days.map(d => STRATEGY_DATA.hold.curve(d));
-  const floorLine = Array(90).fill(3.0);
+  const H = reservePolicies.horizon_days;
+  const labels = Array.from({ length: H }, (_, i) => `Day ${i + 1}`);
+  const style = { steady: "#10B981", aggressive: "#EF4444", hold: "#38BDF8" };
+  const datasets = Object.entries(reservePolicies.policies).map(([key, p]) => ({
+    label: `${p.label} (${p.rate_kbd} kbd)`,
+    data: p.cover_days_curve,
+    borderColor: style[key],
+    backgroundColor: key === activeKey ? `${style[key]}26` : "transparent",
+    borderWidth: key === activeKey ? 3.5 : 1.5,
+    borderDash: key === activeKey ? [] : [4, 4],
+    fill: key === activeKey,
+    pointRadius: 0
+  }));
+  if (reserveLpCurve) {
+    datasets.push({
+      label: "LP-optimal for current scenario",
+      data: reserveLpCurve,
+      borderColor: "#F59E0B",
+      borderWidth: activeKey === "lp" ? 3.5 : 2,
+      pointRadius: 0,
+      fill: false
+    });
+  }
+  datasets.push({
+    label: `Safety floor (${reservePolicies.safety_floor_days.toFixed(1)} days)`,
+    data: Array(H).fill(reservePolicies.safety_floor_days),
+    borderColor: "rgba(255, 255, 255, 0.4)",
+    borderDash: [6, 6],
+    borderWidth: 1.5,
+    pointRadius: 0,
+    fill: false
+  });
 
   reserveChartInst = new Chart(canvas, {
     type: "line",
-    data: {
-      labels: labels,
-      datasets: [
-        {
-          label: "Steady Drawdown (180 kbd)",
-          data: steadyLine,
-          borderColor: "#10B981",
-          backgroundColor: activeKey === "steady" ? "rgba(16, 185, 129, 0.15)" : "transparent",
-          borderWidth: activeKey === "steady" ? 3.5 : 1.5,
-          fill: activeKey === "steady",
-          pointRadius: 0
-        },
-        {
-          label: "Aggressive Early Release (350 kbd)",
-          data: aggLine,
-          borderColor: "#EF4444",
-          backgroundColor: activeKey === "aggressive" ? "rgba(239, 68, 68, 0.15)" : "transparent",
-          borderWidth: activeKey === "aggressive" ? 3.5 : 1.5,
-          borderDash: activeKey === "aggressive" ? [] : [4, 4],
-          fill: activeKey === "aggressive",
-          pointRadius: 0
-        },
-        {
-          label: "Hold & Conserve (65 kbd)",
-          data: holdLine,
-          borderColor: "#38BDF8",
-          backgroundColor: activeKey === "hold" ? "rgba(56, 189, 248, 0.15)" : "transparent",
-          borderWidth: activeKey === "hold" ? 3.5 : 1.5,
-          borderDash: activeKey === "hold" ? [] : [2, 2],
-          fill: activeKey === "hold",
-          pointRadius: 0
-        },
-        {
-          label: "Emergency Safety Floor (3.0 Days Preserved)",
-          data: floorLine,
-          borderColor: "rgba(255, 255, 255, 0.4)",
-          borderDash: [6, 6],
-          borderWidth: 1.5,
-          pointRadius: 0,
-          fill: false
-        }
-      ]
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: {
-          labels: { color: "#E2E8F0", boxWidth: 14, font: { size: 11 } }
-        },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              return `${context.dataset.label}: ${context.parsed.y.toFixed(1)} days of cover`;
-            }
-          }
-        }
+        legend: { display: true, position: "top", labels: { color: "#c9d1d9", boxWidth: 12, font: { size: 10 } } }
       },
       scales: {
-        x: {
-          ticks: { color: "#94A3B8", maxTicksLimit: 12 },
-          grid: { display: false }
-        },
+        x: { ticks: { color: "#94A3B8", maxTicksLimit: 12 }, grid: { display: false } },
         y: {
           min: 0,
-          max: 11,
+          max: Math.ceil(reservePolicies.initial_cover_days + 1),
           ticks: { color: "#94A3B8" },
           grid: { color: "rgba(255,255,255,0.05)" },
-          title: {
-            display: true,
-            text: "Sovereign Import Cover (Days)",
-            color: "#E2E8F0",
-            font: { size: 11, weight: "bold" }
-          }
+          title: { display: true, text: "SPR Cover (Days)", color: "#E2E8F0", font: { size: 11, weight: "bold" } }
         }
       }
     }
   });
 }
 
-function initReserveChart() {
+async function syncReserveWithScenario() {
+  // LP against the scenario currently set in the simulator, with live follow-on risk
+  const body = {
+    corridor: document.getElementById("sim-chokepoint-select").value,
+    disruption_duration_days: parseInt(document.getElementById("sim-slider-duration").value),
+    disruption_severity_pct: parseInt(document.getElementById("sim-slider-severity").value)
+  };
+  const res = await fetch("/api/reserve/optimize-lp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const lp = await res.json();
+
+  const H = reservePolicies.horizon_days;
+  const curve = lp.timeline.map(p => p.remaining_spr_days).slice(0, H);
+  while (curve.length < H) curve.push(curve.length ? curve[curve.length - 1] : reservePolicies.initial_cover_days);
+  reserveLpCurve = curve;
+
+  const drawDays = lp.timeline.filter(p => p.spr_drawdown_kbd > 0.5);
+  const avgRate = drawDays.length ? drawDays.reduce((a, p) => a + p.spr_drawdown_kbd, 0) / drawDays.length : 0;
+  setText("spr-stat-rate", `${Math.round(avgRate)} kbd`);
+  setText("spr-stat-rate-sub", `LP average over ${drawDays.length} release days`);
+  setText("spr-stat-exhaust", `${lp.summary.final_remaining_spr_days.toFixed(1)} Days`);
+  setText("spr-stat-exhaust-sub", `Cover left after ${body.disruption_duration_days}-day ${body.corridor} scenario`);
+  setText("reserve-verdict-text",
+    `${lp.summary.drawdown_strategy} Follow-on risk P = ${(lp.parameters.p_followon_disruption * 100).toFixed(1)}% (live Hormuz, 30-day). ${lp.solver}.`);
+  renderReserveChart("lp");
+}
+
+async function initReserveChart() {
   const stratBtns = document.querySelectorAll(".strat-btn[data-strategy]");
   const syncBtn = document.getElementById("spr-sync-live-btn");
+
+  try {
+    const res = await fetch("/api/reserve/policies");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    reservePolicies = await res.json();
+  } catch (err) {
+    setText("reserve-verdict-text", `Reserve policies unavailable (${err.message}).`);
+    return;
+  }
 
   stratBtns.forEach(btn => {
     btn.addEventListener("click", () => {
       stratBtns.forEach(b => b.classList.remove("active"));
       if (syncBtn) syncBtn.classList.remove("active");
       btn.classList.add("active");
-
-      const strat = btn.getAttribute("data-strategy");
-      activeReserveStrategy = strat;
-      updateReserveUI(strat);
+      activeReserveStrategy = btn.getAttribute("data-strategy");
+      updateReserveUI(activeReserveStrategy);
     });
   });
 
   if (syncBtn) {
-    syncBtn.addEventListener("click", () => {
+    syncBtn.addEventListener("click", async () => {
       stratBtns.forEach(b => b.classList.remove("active"));
       syncBtn.classList.add("active");
-
-      // Compute optimal drawdown based on active Hormuz score
-      const hormuzScore = CHOKEPOINTS_DATA["Hormuz"] ? CHOKEPOINTS_DATA["Hormuz"].score : 6.8;
-      let optimalRate = Math.min(450, Math.round(hormuzScore * 38));
-      let daysCover = Math.max(22, Math.round(52 - (hormuzScore - 5.0) * 8));
-
-      const rateEl = document.getElementById("spr-stat-rate");
-      if (rateEl) rateEl.textContent = `${optimalRate} kbd`;
-
-      const rateSubEl = document.getElementById("spr-stat-rate-sub");
-      if (rateSubEl) rateSubEl.textContent = `Calibrated for ${hormuzScore.toFixed(1)}/10 Threat`;
-
-      const exhaustEl = document.getElementById("spr-stat-exhaust");
-      if (exhaustEl) exhaustEl.textContent = `${daysCover} Days`;
-
-      const verdictEl = document.getElementById("reserve-verdict-text");
-      if (verdictEl) {
-        verdictEl.textContent = `Risk-Calibrated Drawdown: At Hormuz threat ${hormuzScore.toFixed(1)}/10, optimal release of ${optimalRate} kbd covers Indian refinery deficits through day ${daysCover}.`;
+      try {
+        await syncReserveWithScenario();
+      } catch (err) {
+        setText("reserve-verdict-text", `Reserve LP unavailable (${err.message}).`);
       }
-
-      // Choose closest strategy curve to render
-      const chosen = optimalRate > 250 ? "aggressive" : (optimalRate < 100 ? "hold" : "steady");
-      renderReserveChart(chosen);
     });
   }
 

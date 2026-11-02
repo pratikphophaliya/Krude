@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field
 
 from engine.database import db
 from engine.risk_intel import RiskIntelligenceAgent, CORRIDORS
-from engine.scenario_modeller import DisruptionScenarioModeller
+from engine.scenario_modeller import DisruptionScenarioModeller, run_scenario
 from engine.procurement_orchestrator import AdaptiveProcurementOrchestrator
 from engine.spr_optimiser import StrategicReserveOptimiser
 from engine.fine_tuning_adapter import AIModelManager
@@ -98,23 +98,21 @@ class ProcurementOptimizeRequest(BaseModel):
     allow_sanctioned: bool = Field(False)
     corridor_risk_scores: Optional[Dict[CorridorName, float]] = None
 
-class ReserveDrawdownRequest(BaseModel):
-    safety_floor_days: float = Field(3.0, ge=0.0, le=9.0)
-    disruption_duration_days: int = Field(30, ge=1, le=180)
-
 class ReserveLPOptimizeRequest(BaseModel):
-    duration_days: int = Field(60, ge=10, le=180)
-    gross_blocked_kbd: float = Field(1930.0, ge=0.0, le=5405.0)
-    p_hormuz: float = Field(0.88, ge=0.0, le=1.0)
-    cape_arrival_day: int = Field(35, ge=10, le=60)
-    cape_rerouted_kbd: float = Field(1100.0, ge=0.0, le=3000.0)
+    # The supply-gap forecast comes from the scenario model for these inputs
+    corridor: CorridorName = "Hormuz"
+    disruption_duration_days: int = Field(60, ge=1, le=180)
+    disruption_severity_pct: float = Field(100.0, ge=0.0, le=100.0)
+    safety_floor_days: float = Field(3.0, ge=0.0, le=9.0)
+    # Optional override; omitted = live 30-day Hormuz disruption probability
+    p_followon: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 class UnifiedStateRequest(BaseModel):
     selected_corridor: CorridorName = "Hormuz"
     disruption_severity_pct: float = Field(50.0, ge=0.0, le=100.0)
     disruption_duration_days: int = Field(30, ge=1, le=180)
     price_rise_usd_per_barrel: Optional[float] = Field(None, ge=0.0, le=150.0)
-    safety_floor_days: float = 3.0
+    safety_floor_days: float = Field(3.0, ge=0.0, le=9.0)
     custom_corridor_overrides: Optional[Dict[str, float]] = None
 
 class HeadlineAnalysisRequest(BaseModel):
@@ -380,30 +378,34 @@ def optimize_procurement(req: ProcurementOptimizeRequest):
         allow_sanctioned=req.allow_sanctioned
     )
 
-@app.post("/api/reserve/drawdown")
-def calculate_reserve_drawdown(req: ReserveDrawdownRequest):
-    """Legacy simple reserve drawdown calculator."""
-    return spr_optimiser.calculate_drawdown(
-        safety_floor_days=req.safety_floor_days,
-        disruption_duration_days=req.disruption_duration_days
-    )
+def reserve_plan(corridor: str, duration_days: int, severity_pct: float,
+                 safety_floor_days: float = 3.0, p_followon: Optional[float] = None) -> Dict:
+    """SPR LP against the scenario model's day-by-day supply gap."""
+    scen = run_scenario(corridor, severity_pct / 100.0, duration_days)
+    if p_followon is None:
+        p_followon = live_corridor_probabilities()["Hormuz"]
+    plan = spr_optimiser.optimize_drawdown_lp(
+        scen["gap_kbd_by_day"], p_followon,
+        base_supply_kbd=scen["india_crude_runs_kbd"], safety_floor_days=safety_floor_days)
+    plan["scenario"] = {k: scen[k] for k in ("corridor", "phi", "duration_days", "daily_gap_kbd", "gap_days", "india_crude_runs_kbd")}
+    return plan
 
 @app.post("/api/reserve")
 @app.post("/reserve")
 @app.post("/api/reserve/optimize-lp")
 def optimize_reserve_lp(req: ReserveLPOptimizeRequest):
     """
-    Clean Endpoint 4: Strategic Petroleum Reserve LP Optimization
-    Solves min sum(shortfall_t * VoLL + d_t * opportunity_cost)
-    s.t. R_{t+1} = R_t - d_t, 0 <= d_t <= SPR_MAX_DRAW_KBD, R_t >= R_min + P_hormuz * tail_gap
+    Clean Endpoint 4: SPR drawdown LP against the scenario's supply-gap forecast.
+    min sum(shortfall_t * VoLL + d_t * opportunity_cost)
+    s.t. R_{t+1} = R_t - d_t, 0 <= d_t <= max draw, R_t >= floor_days * basis + P(follow-on) * tail_gap
     """
-    return spr_optimiser.optimize_drawdown_lp(
-        duration_days=req.duration_days,
-        gross_blocked_kbd=req.gross_blocked_kbd,
-        p_hormuz=req.p_hormuz,
-        cape_arrival_day=req.cape_arrival_day,
-        cape_rerouted_kbd=req.cape_rerouted_kbd
-    )
+    return reserve_plan(req.corridor, req.disruption_duration_days, req.disruption_severity_pct,
+                        req.safety_floor_days, req.p_followon)
+
+@app.get("/api/reserve/policies")
+def get_reserve_policies(safety_floor_days: float = Query(3.0, ge=0.0, le=9.0), horizon_days: int = Query(90, ge=10, le=365)):
+    """Days of cover over time for fixed release policies (steady 180, aggressive 350, hold 65 kbd)."""
+    return spr_optimiser.simulate_policies(horizon_days=horizon_days, safety_floor_days=safety_floor_days)
 
 # ==============================================================================
 # BLOCK 5: LIVE STREAM & 60x REPLAY SIMULATION ENDPOINTS
@@ -444,7 +446,6 @@ def get_unified_digital_twin_state(req: UnifiedStateRequest):
         overrides[req.selected_corridor] = req.disruption_severity_pct
 
     risk_data = risk_agent.evaluate_all_corridors(custom_disruptions=overrides)
-    corridor_scores = {c["corridor"]: c["risk_score"] for c in risk_data["corridors"]}
 
     scenario_data = scenario_modeller.simulate(
         corridor=req.selected_corridor,
@@ -453,18 +454,20 @@ def get_unified_digital_twin_state(req: UnifiedStateRequest):
         disruption_severity_pct=req.disruption_severity_pct
     )
 
-    procurement_data = procurement_orchestrator.rank_suppliers(live_corridor_probabilities(corridor_scores))
-    reserve_data = spr_optimiser.calculate_drawdown(
-        safety_floor_days=req.safety_floor_days,
-        disruption_duration_days=req.disruption_duration_days
-    )
+    # In the what-if, the disrupted corridor is at least as risky as the simulated severity
+    corridor_p = live_corridor_probabilities()
+    corridor_p[req.selected_corridor] = max(corridor_p[req.selected_corridor], req.disruption_severity_pct / 100.0)
+    procurement_data = procurement_orchestrator.rank_suppliers(corridor_p)
+    reserve_data = reserve_plan(req.selected_corridor, req.disruption_duration_days,
+                                req.disruption_severity_pct, req.safety_floor_days)
 
     timestamp = time.strftime("%H:%M:%S UTC", time.gmtime())
-    top_supplier = procurement_data.get("optimal_recommendation", {}).get("supplier", "Saudi Arabia")
+    top = procurement_data["optimal_recommendation"]
     log_entry = {
         "timestamp": timestamp,
         "event": f"Simulated disruption in {req.selected_corridor} at {req.disruption_severity_pct:.0f}% closure",
-        "action": f"Prioritize crude sourcing from {top_supplier}; release {reserve_data['max_daily_drawdown_days']} reserve-days/day."
+        "action": (f"Prioritise {top['crude_grade']} from {top['supplier']} via {top['chokepoint_route']}; "
+                   f"{reserve_data['summary']['drawdown_strategy']}") if top else reserve_data["summary"]["drawdown_strategy"],
     }
 
     return {

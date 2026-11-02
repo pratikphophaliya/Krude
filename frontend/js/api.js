@@ -57,19 +57,6 @@ const API = {
     return await res.json();
   },
 
-  async calculateReserveDrawdown(safetyFloorDays = 3.0, durationDays = 30) {
-    const res = await fetch(`${API_BASE}/api/reserve/drawdown`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        safety_floor_days: safetyFloorDays,
-        disruption_duration_days: durationDays
-      })
-    });
-    if (!res.ok) throw new Error("Failed to calculate reserve drawdown");
-    return await res.json();
-  },
-
   async getDigitalTwinState(payload) {
     const res = await fetch(`${API_BASE}/api/digital-twin/state`, {
       method: "POST",
