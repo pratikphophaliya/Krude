@@ -1131,35 +1131,38 @@ function initScenarioSimulator() {
   executeScenario();
 }
 
-function executeScenario() {
+async function executeScenario() {
   const duration = parseInt(document.getElementById("sim-slider-duration").value);
   const severityPct = parseInt(document.getElementById("sim-slider-severity").value);
-  const chokepoint = document.getElementById("sim-chokepoint-select").value;
-  const phi = severityPct / 100.0;
+  const corridor = document.getElementById("sim-chokepoint-select").value;
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
 
-  const baseKbd = (chokepoint === "Hormuz" ? 2598.3 : (chokepoint === "Bab-el-Mandeb" ? 2355.0 : 900.0));
-  const dailyDeficitKbd = Math.round(baseKbd * phi);
-  const priceDelta = (phi * 15.0).toFixed(2);
-  const importCostDelta = ((parseFloat(priceDelta) * 5.405 * duration) / 1000.0).toFixed(2);
-  const gdpHeadwind = ((parseFloat(priceDelta) / 10.0) * 0.20).toFixed(2);
-  const pumpImpact = (parseFloat(priceDelta) * 0.52).toFixed(2);
-  const refineryDrop = (severityPct * 0.30).toFixed(1);
+  let res;
+  try {
+    res = await API.simulateScenario({
+      corridor,
+      disruption_duration_days: duration,
+      disruption_severity_pct: severityPct
+    });
+  } catch (err) {
+    set("res-peak-gap", "unavailable");
+    set("res-import-cost", "unavailable");
+    console.warn("Scenario simulation failed:", err);
+    return;
+  }
 
-  // Update Top 3 Tiles
-  document.getElementById("res-peak-gap").textContent = `${dailyDeficitKbd.toLocaleString()} kbd`;
-  document.getElementById("res-import-cost").textContent = `+$${importCostDelta} B`;
+  const i = res.impacts;
+  const gapKbd = Math.round(res.scenario_inputs.blocked_supply_kbd);
+  set("res-peak-gap", `${gapKbd.toLocaleString()} kbd`);
+  set("res-import-cost", `+$${i.estimated_additional_cost_usd_billion.toFixed(2)} B`);
+  set("wf-val-lost", `${gapKbd.toLocaleString()} kbd × ${i.gap_days}d`);
+  set("wf-val-cost", `+$${i.estimated_additional_cost_usd_billion.toFixed(2)} B`);
+  set("wf-val-pump", `+₹${i.retail_fuel_rs_per_litre.toFixed(2)} /L`);
+  set("wf-val-refinery", `-${i.refining_utilization_drop_peak_pct}% peak`);
+  set("wf-val-gdp", `${i.gdp_impact_pp.toFixed(3)} pp`);
+  set("sim-explanation", res.explanation);
 
-  const daysCoverRemaining = Math.max(3.0, (9.5 - (dailyDeficitKbd / 5405.0) * duration * 0.25)).toFixed(1);
-  document.getElementById("res-days-cover").textContent = `${daysCoverRemaining} days`;
-
-  // Update 5 Waterfall Transmission Cards (Scaled & Bold)
-  document.getElementById("wf-val-lost").textContent = `${dailyDeficitKbd.toLocaleString()} kbd`;
-  document.getElementById("wf-val-cost").textContent = `+$${importCostDelta} B`;
-  document.getElementById("wf-val-pump").textContent = `+₹${pumpImpact} /L`;
-  document.getElementById("wf-val-refinery").textContent = `-${refineryDrop}%`;
-  document.getElementById("wf-val-gdp").textContent = `-${gdpHeadwind} pp`;
-
-  renderSupplyGapChart(duration, dailyDeficitKbd);
+  renderSupplyGapChart(duration, gapKbd);
 }
 
 async function renderSupplyGapChart(days, gapKbd) {
@@ -1194,6 +1197,8 @@ async function renderSupplyGapChart(days, gapKbd) {
         available = data.timeline.map(p => p.available_supply_kbd);
         sprDrawdown = data.timeline.map(p => p.spr_drawdown_kbd);
         remainingSprDays = data.timeline.map(p => p.remaining_spr_days);
+        const cover = document.getElementById("res-days-cover");
+        if (cover) cover.textContent = `${remainingSprDays[remainingSprDays.length - 1].toFixed(1)} days`;
       }
     }
   } catch (err) {

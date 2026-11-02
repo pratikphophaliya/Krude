@@ -291,3 +291,32 @@ live_stream_poller:
     - "KW"  # Kuwait (Mina Al Ahmadi crude terminal)
     - "ZA"  # South Africa (Cape of Good Hope bunkering hub)
     - "MY"  # Malaysia (Strait of Malacca maritime patrols)
+
+# ==============================================================================
+# SCENARIO MODEL (read by engine/scenario_modeller.py)
+# ==============================================================================
+scenario_model:
+  # SOURCE: EIA Short-Term Energy Outlook, world liquids supply (~102.8 MBPD)
+  global_liquids_supply_mbpd: 102.8
+  # Combined short-run supply+demand price elasticity: dP/P = (lost supply share) / elasticity.
+  # Literature range ~0.1-0.25 (e.g. Caldara, Cavallo & Iacoviello 2019); 0.2 is a stated mid assumption.
+  price_elasticity_short_run: 0.2
+  # Extra VLCC time-charter + bunker cost of a longer voyage, ~$50k/day over 2 MMbbl (stated assumption)
+  freight_premium_usd_per_bbl_per_extra_day: 0.03
+  # Share of a crude price rise passed to Indian retail fuel (OMCs often hold prices; 1.0 = full)
+  retail_pass_through: 1.0
+  litres_per_barrel: 158.987
+  # SOURCE: PPAC; domestic production that keeps refineries running when imports stop
+  india_domestic_crude_kbd: 580.0
+  # Macro rules of thumb are per +$10/bbl SUSTAINED FOR A YEAR; scaled by duration/365
+  gdp_pp_per_10usd_year: -0.20
+  cad_bps_per_10usd_year: 35.0
+  corridors:
+    # global_flow_mbpd: EIA chokepoint estimates (2024, crude + products, approximate)
+    # bypass_mbpd: pipeline capacity that can avoid the chokepoint (EIA: Petroline + ADCOP spare ~2.6)
+    # reroute_extra_days: added voyage time if ships divert; null = no sea reroute exists
+    Hormuz:            {global_flow_mbpd: 20.0, bypass_mbpd: 2.6, reroute_extra_days: null}
+    Bab-el-Mandeb:     {global_flow_mbpd: 4.0,  bypass_mbpd: 0.0, reroute_extra_days: 12}
+    Suez:              {global_flow_mbpd: 4.5,  bypass_mbpd: 0.0, reroute_extra_days: 12}
+    Malacca:           {global_flow_mbpd: 23.7, bypass_mbpd: 0.0, reroute_extra_days: 3}
+    Cape of Good Hope: {global_flow_mbpd: 9.0,  bypass_mbpd: 0.0, reroute_extra_days: 5}

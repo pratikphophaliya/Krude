@@ -29,19 +29,23 @@ def compute_corridor_exposure(db_path: Path = DB_PATH) -> Dict[str, Any]:
         WHERE month IN (SELECT month FROM latest_3m)
         GROUP BY country
     ),
+    -- Split each country's volume across all its export routes in proportion to route capacity
+    -- (a single "primary" route per country put all Russian barrels through Suez and none via Malacca)
     country_exposure AS (
-        SELECT t.country, t.avg_kbd, r.chokepoint
+        SELECT t.country,
+               t.avg_kbd * r.capacity_kbd / SUM(r.capacity_kbd) OVER (PARTITION BY t.country) AS avg_kbd,
+               r.chokepoint
         FROM trailing_3m t
-        JOIN (
-            SELECT COALESCE(source_country, source) as src_country, chokepoint,
-                   ROW_NUMBER() OVER (PARTITION BY COALESCE(source_country, source) ORDER BY (chokepoint != 'none') DESC, distance_km ASC) as rn
-            FROM routes
-        ) r ON LOWER(TRIM(t.country)) = LOWER(TRIM(r.src_country)) AND r.rn = 1
+        JOIN routes r ON LOWER(TRIM(t.country)) = LOWER(TRIM(COALESCE(r.source_country, r.source)))
     )
     SELECT * FROM country_exposure
     """
     df = con.execute(query).df()
-    total_kbd = float(df['avg_kbd'].sum())
+    # Total includes countries without a mapped route (e.g. "Other Suppliers"), so shares are of all imports
+    total_kbd = float(con.execute("""
+        SELECT SUM(volume_kbd) / 3.0 FROM imports
+        WHERE month IN (SELECT DISTINCT month FROM imports ORDER BY month DESC LIMIT 3)
+    """).fetchone()[0])
 
     # 2. Compute barrels sitting behind each chokepoint (One number per chokepoint)
     CHOKEPOINTS = ["hormuz", "bab_el_mandeb", "suez", "malacca", "cape_of_good_hope"]

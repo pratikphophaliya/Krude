@@ -3,6 +3,7 @@ Krude - Brent Crude Market Data
 ===============================
 - Daily history: FRED series DCOILBRENTEU (Europe Brent spot FOB, source EIA). Keyless CSV,
   refreshed at most once a day and cached in data/brent_history.csv.
+- USD/INR: FRED DEXINUS, same caching.
 - Latest price: ICE Brent front-month futures (Yahoo Finance BZ=F), falling back to the
   latest FRED close. Every value carries its source and as-of date.
 """
@@ -57,6 +58,29 @@ def brent_on(date_str: str) -> Optional[float]:
     prices = get_brent_history()
     earlier = [d for d in prices if d <= date_str]
     return prices[max(earlier)] if earlier else None
+
+
+def get_usd_inr() -> Dict[str, Any]:
+    """Latest INR per USD from FRED DEXINUS (daily, keyless), cached daily; None if unreachable."""
+    path = DATA_DIR / "usd_inr_history.csv"
+    if not path.exists() or time.time() - path.stat().st_mtime > HISTORY_MAX_AGE_SECONDS:
+        try:
+            resp = requests.get(FRED_URL, params={"id": "DEXINUS", "cosd": "2025-01-01"}, timeout=20)
+            resp.raise_for_status()
+            path.write_text(resp.text, encoding="utf-8")
+        except Exception:
+            pass
+    rates = {}
+    if path.exists():
+        for row in csv.reader(io.StringIO(path.read_text(encoding="utf-8"))):
+            try:
+                rates[row[0]] = float(row[1])
+            except (ValueError, IndexError):
+                continue
+    if not rates:
+        return {"inr_per_usd": None, "as_of": None, "source": "unavailable"}
+    last = max(rates)
+    return {"inr_per_usd": rates[last], "as_of": last, "source": "FRED DEXINUS"}
 
 
 def get_brent_spot() -> Dict[str, Any]:

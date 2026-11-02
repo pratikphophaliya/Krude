@@ -84,8 +84,8 @@ CorridorName = Literal["Hormuz", "Bab-el-Mandeb", "Malacca", "Cape of Good Hope"
 class ScenarioSimRequest(BaseModel):
     corridor: CorridorName = "Hormuz"
     disruption_duration_days: int = Field(30, ge=1, le=180)
-    price_rise_usd_per_barrel: float = Field(15.0, ge=0.0, le=150.0)
-    net_shortfall_pct: float = Field(22.5, ge=0.0, le=100.0)
+    # Optional analyst override; omitted = modelled from global supply loss and live Brent
+    price_rise_usd_per_barrel: Optional[float] = Field(None, ge=0.0, le=150.0)
     disruption_severity_pct: float = Field(50.0, ge=0.0, le=100.0)
 
 class ProcurementRankRequest(BaseModel):
@@ -111,10 +111,9 @@ class ReserveLPOptimizeRequest(BaseModel):
 
 class UnifiedStateRequest(BaseModel):
     selected_corridor: CorridorName = "Hormuz"
-    disruption_severity_pct: float = 50.0
-    disruption_duration_days: int = 30
-    price_rise_usd_per_barrel: float = 15.0
-    net_shortfall_pct: float = 22.5
+    disruption_severity_pct: float = Field(50.0, ge=0.0, le=100.0)
+    disruption_duration_days: int = Field(30, ge=1, le=180)
+    price_rise_usd_per_barrel: Optional[float] = Field(None, ge=0.0, le=150.0)
     safety_floor_days: float = 3.0
     custom_corridor_overrides: Optional[Dict[str, float]] = None
 
@@ -361,7 +360,6 @@ def simulate_scenario(req: ScenarioSimRequest):
         corridor=req.corridor,
         disruption_duration_days=req.disruption_duration_days,
         price_rise_usd_per_barrel=req.price_rise_usd_per_barrel,
-        net_shortfall_pct=req.net_shortfall_pct,
         disruption_severity_pct=req.disruption_severity_pct
     )
 
@@ -452,7 +450,6 @@ def get_unified_digital_twin_state(req: UnifiedStateRequest):
         corridor=req.selected_corridor,
         disruption_duration_days=req.disruption_duration_days,
         price_rise_usd_per_barrel=req.price_rise_usd_per_barrel,
-        net_shortfall_pct=req.net_shortfall_pct,
         disruption_severity_pct=req.disruption_severity_pct
     )
 

@@ -3963,3 +3963,9 @@ button:active, .strat-btn:active, .quick-sample-btn:active, .proc-mode-btn:activ
 .legal-modal-body strong {
     color: #FFFFFF;
 }
+.sim-explanation {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0 0 16px 0;
+}

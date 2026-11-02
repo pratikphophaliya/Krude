@@ -825,11 +825,11 @@
           <div class="control-group">
             <label class="control-label">TARGET CHOKEPOINT</label>
             <select id="sim-chokepoint-select" class="custom-select">
-              <option value="Hormuz" selected>Strait of Hormuz (2,598 kbd base)</option>
-              <option value="Bab-el-Mandeb">Bab-el-Mandeb / Red Sea (2,355 kbd base)</option>
-              <option value="Suez">Suez Canal (900 kbd base)</option>
-              <option value="Malacca">Malacca Strait (800 kbd base)</option>
-              <option value="Cape of Good Hope">Cape of Good Hope (650 kbd base)</option>
+              <option value="Hormuz" selected>Strait of Hormuz</option>
+              <option value="Bab-el-Mandeb">Bab-el-Mandeb / Red Sea</option>
+              <option value="Suez">Suez Canal</option>
+              <option value="Malacca">Malacca Strait</option>
+              <option value="Cape of Good Hope">Cape of Good Hope</option>
             </select>
           </div>
 
@@ -873,19 +873,19 @@
           <div class="sim-impact-tiles-grid">
             <div class="impact-tile">
               <span class="it-label">Cover Remaining</span>
-              <span class="it-val font-mono text-red" id="res-days-cover">6.2 days</span>
+              <span class="it-val font-mono text-red" id="res-days-cover">&mdash;</span>
               <span class="it-sub">Danger floor: 3.0 days</span>
             </div>
 
             <div class="impact-tile">
               <span class="it-label">Peak Supply Shortfall</span>
-              <span class="it-val font-mono text-amber" id="res-peak-gap">1,299 kbd</span>
+              <span class="it-val font-mono text-amber" id="res-peak-gap">&mdash;</span>
               <span class="it-sub">~1.30 MBPD physical gap</span>
             </div>
 
             <div class="impact-tile">
               <span class="it-label">Added Import Burden</span>
-              <span class="it-val font-mono text-white" id="res-import-cost">+$2.44 B</span>
+              <span class="it-val font-mono text-white" id="res-import-cost">&mdash;</span>
               <span class="it-sub">Price surge: +$15.02/bbl</span>
             </div>
           </div>
@@ -895,6 +895,7 @@
             <div class="card-header-bar">
               <h4 class="card-header-title">Macroeconomic & Supply Transmission Waterfall</h4>
             </div>
+            <p class="sim-explanation" id="sim-explanation"></p>
 
             <div class="waterfall-cards-grid" id="waterfall-cards-grid">
 

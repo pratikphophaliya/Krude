@@ -187,23 +187,12 @@ class EnergyTwinDB:
         except Exception:
             pass
 
+        # Table missing (e.g. DB built by an older loader): compute it from imports + routes
         try:
             from data.corridor_exposure import compute_corridor_exposure
-            return compute_corridor_exposure(self.duckdb_path)
-        except Exception:
-            return {
-                "total_import_demand_kbd": 4699.2,
-                "total_import_demand_mbpd": 4.699,
-                "corridors": {
-                    "hormuz": {"chokepoint": "hormuz", "volume_at_risk_kbd": 797.9, "volume_at_risk_mbpd": 0.798, "share_of_india_imports_pct": 17.0, "supplier_breakdown": []},
-                    "bab_el_mandeb": {"chokepoint": "bab_el_mandeb", "volume_at_risk_kbd": 2510.5, "volume_at_risk_mbpd": 2.510, "share_of_india_imports_pct": 53.4, "supplier_breakdown": []},
-                    "suez": {"chokepoint": "suez", "volume_at_risk_kbd": 2510.5, "volume_at_risk_mbpd": 2.510, "share_of_india_imports_pct": 53.4, "supplier_breakdown": []},
-                    "malacca": {"chokepoint": "malacca", "volume_at_risk_kbd": 0.0, "volume_at_risk_mbpd": 0.0, "share_of_india_imports_pct": 0.0, "supplier_breakdown": []},
-                    "cape_of_good_hope": {"chokepoint": "cape_of_good_hope", "volume_at_risk_kbd": 1179.5, "volume_at_risk_mbpd": 1.179, "share_of_india_imports_pct": 25.1, "supplier_breakdown": []}
-                }
-            }
-            corridors = {r["chokepoint"]: {"chokepoint": r["chokepoint"], "volume_at_risk_kbd": r["volume_kbd"], "volume_at_risk_mbpd": r["volume_mbpd"], "share_of_india_imports_pct": r["share_pct"]} for r in rows}
-            return {"corridors": corridors}
+        except ImportError:
+            from backend.data.corridor_exposure import compute_corridor_exposure
+        return compute_corridor_exposure(self.duckdb_path)
 
     def get_database_summary(self) -> Dict[str, Any]:
         """Returns statistics and metadata across all 5 tables in DuckDB."""

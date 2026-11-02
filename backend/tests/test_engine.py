@@ -238,16 +238,23 @@ class TestKrudeDigitalTwin(unittest.TestCase):
         self.assertGreater(attack["risk_score"], calm["risk_score"])
 
     def test_block4_scenario_engine(self):
-        """Validates Block 4 run_scenario CLI engine outputs."""
-        from engine.scenario_modeller import run_scenario
-        res = run_scenario("Hormuz", phi=0.5, duration_days=30)
-        self.assertEqual(res["chokepoint"], "Hormuz")
-        self.assertEqual(res["phi"], 0.5)
-        self.assertEqual(res["duration_days"], 30)
-        self.assertEqual(len(res["gap_kbd_by_day"]), 30)
-        self.assertAlmostEqual(res["daily_gap_kbd"], 1299.2, delta=5.0)
-        self.assertGreater(res["price_delta"], 10.0)
-        self.assertGreater(res["import_bill_delta"], 1.5)
+        """Scenario gap comes from real corridor exposure; reroutable corridors only lose the extra voyage days."""
+        from unittest import mock
+        from engine import scenario_modeller
+        market = {"brent_usd": 100.0, "brent_source": "test", "brent_as_of": None, "inr_per_usd": 90.0, "inr_source": "test"}
+        with mock.patch.object(scenario_modeller, "_market_baseline", return_value=market):
+            hormuz = scenario_modeller.run_scenario("Hormuz", phi=0.5, duration_days=30)
+            red_sea = scenario_modeller.run_scenario("Bab-el-Mandeb", phi=1.0, duration_days=30)
+
+        exposure = db.get_corridor_exposure()["corridors"]
+        self.assertAlmostEqual(hormuz["daily_gap_kbd"], exposure["hormuz"]["volume_at_risk_kbd"] * 0.5, delta=0.1)
+        self.assertEqual(hormuz["gap_days"], 30, "Hormuz has no sea reroute")
+        self.assertEqual(len(hormuz["gap_kbd_by_day"]), 30)
+        # 50% of (20 - 2.6) MBPD over 102.8 MBPD, elasticity 0.2, on $100 Brent
+        self.assertAlmostEqual(hormuz["price_rise_usd"], 100.0 * (0.5 * 17.4 / 102.8) / 0.2, delta=0.05)
+        self.assertEqual(red_sea["gap_days"], 12, "Red Sea cargoes reroute via the Cape (+12 days)")
+        self.assertEqual(red_sea["gap_kbd_by_day"][12], 0.0)
+        self.assertLess(red_sea["price_rise_usd"], hormuz["price_rise_usd"])
 
     def test_block5_maritime_graph(self):
         """Validates Block 5 NetworkX supply chain graph topology."""
