@@ -26,6 +26,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
 
+try:
+    from engine.market_data import brent_on
+except ImportError:
+    from backend.engine.market_data import brent_on
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 # Comprehensive 18-24 Month Historical Chronology of Maritime & Geopolitical Incidents
@@ -523,49 +528,9 @@ class RiskPipeline:
         p_closure_30d = round(0.0005 + 0.042 * (idx ** 1.6), 4)
         return p_disruption_30d, p_closure_30d
 
-    def get_interpolated_brent_price(self, dt_str: str) -> float:
-        """
-        Returns empirical Brent Crude oil spot price ($/bbl) for historical validation.
-        """
-        brent_anchor_dates = [
-            ("2024-04-01", 89.0),
-            ("2024-04-14", 91.2),  # Israel-Iran strike spike
-            ("2024-05-15", 83.5),
-            ("2024-06-01", 78.2),  # Calm period
-            ("2024-07-20", 85.0),
-            ("2024-08-20", 80.0),
-            ("2024-09-15", 74.0),
-            ("2024-10-03", 89.5),  # 180 Ballistic missiles spike
-            ("2024-11-15", 73.0),
-            ("2024-12-15", 74.5),
-            ("2025-01-20", 77.0),
-            ("2025-03-20", 76.0),
-            ("2025-06-25", 71.2),  # Calm period
-            ("2025-10-15", 73.0),
-            ("2026-01-28", 84.5),  # Persian Gulf gunboat interdictions
-            ("2026-05-15", 76.0),
-            ("2026-08-18", 82.5)   # August 2026 current
-        ]
-        t_target = datetime.strptime(dt_str, "%Y-%m-%d").timestamp()
-        
-        # Binary search / piecewise linear interpolation
-        t_first = datetime.strptime(brent_anchor_dates[0][0], "%Y-%m-%d").timestamp()
-        t_last = datetime.strptime(brent_anchor_dates[-1][0], "%Y-%m-%d").timestamp()
-        
-        if t_target <= t_first:
-            return brent_anchor_dates[0][1]
-        if t_target >= t_last:
-            return brent_anchor_dates[-1][1]
-
-        for i in range(len(brent_anchor_dates) - 1):
-            d1_str, p1 = brent_anchor_dates[i]
-            d2_str, p2 = brent_anchor_dates[i + 1]
-            t1 = datetime.strptime(d1_str, "%Y-%m-%d").timestamp()
-            t2 = datetime.strptime(d2_str, "%Y-%m-%d").timestamp()
-            if t1 <= t_target <= t2:
-                fraction = (t_target - t1) / (t2 - t1)
-                return round(p1 + fraction * (p2 - p1), 2)
-        return 82.50
+    def get_interpolated_brent_price(self, dt_str: str) -> Optional[float]:
+        """Real Brent spot (FRED DCOILBRENTEU) on that date or the last trading day before it."""
+        return brent_on(dt_str)
 
     def compute_corridor_probability(
         self,
