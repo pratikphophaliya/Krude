@@ -298,7 +298,7 @@
         <div class="sp-header-bar">
           <div class="sp-title-wrap">
             <h2 class="sp-title section-main-heading">Live Supply-Disruption Probability</h2>
-            <p class="sp-caption">30-day horizon · by corridor and supplier · computed from live GDELT news, Searoute shipping graphs & OFAC sanctions</p>
+            <p class="sp-caption">30-day horizon · by corridor and supplier · computed from live news (NewsAPI, GNews, GDELT), OFAC sanctions records & pipeline bypass capacity</p>
           </div>
           <div class="sp-live-badge-group">
             <div class="sp-live-badge">
@@ -318,32 +318,8 @@
               <span class="sp-card-heading">BY CORRIDOR</span>
               <span class="sp-horizon-tag">30-Day Horizon</span>
             </div>
-            <div class="sp-corridors-list">
-              <div class="sp-corridor-item">
-                <div class="sp-c-name">Hormuz</div>
-                <div class="sp-c-val text-red">17.2% <span class="sp-momentum text-red"><i class="fa-solid fa-arrow-trend-up"></i> +0.02 momentum</span></div>
-                <div class="sp-c-sub">Arterial Inflow 2,598 kbd</div>
-              </div>
-              <div class="sp-corridor-item">
-                <div class="sp-c-name">Bab-el-Mandeb</div>
-                <div class="sp-c-val text-amber">8.0% <span class="sp-momentum text-amber"><i class="fa-solid fa-arrow-trend-down"></i> -0.01 momentum</span></div>
-                <div class="sp-c-sub">Red Sea Corridor 2,355 kbd</div>
-              </div>
-              <div class="sp-corridor-item">
-                <div class="sp-c-name">Suez Canal</div>
-                <div class="sp-c-val text-white">3.0% <span class="sp-momentum text-dim">0.00 momentum</span></div>
-                <div class="sp-c-sub">Northbound Canal 900 kbd</div>
-              </div>
-              <div class="sp-corridor-item">
-                <div class="sp-c-name">Malacca Strait</div>
-                <div class="sp-c-val text-green">0.5% <span class="sp-momentum text-dim">0.00 momentum</span></div>
-                <div class="sp-c-sub">Eastbound Conduit 800 kbd</div>
-              </div>
-              <div class="sp-corridor-item sp-cape-item">
-                <div class="sp-c-name">Cape of Good Hope</div>
-                <div class="sp-c-val text-blue">— <span class="sp-cape-tag">(cannot close, +0.9d delay)</span></div>
-                <div class="sp-c-sub">Open Ocean Long-Haul 650 kbd</div>
-              </div>
+            <div class="sp-corridors-list" id="sp-corridors-list">
+              <div class="sp-c-sub">Loading live probabilities&hellip;</div>
             </div>
           </div>
 
@@ -352,7 +328,7 @@
             <div class="sp-card-heading-row">
               <div class="sp-card-title-group">
                 <span class="sp-card-heading">BY SUPPLIER (INDIA'S CRUDE BASKET)</span>
-                <span class="sp-covered-badge" id="sp-covered-badge">18 Nations · 5,405 kbd</span>
+                <span class="sp-covered-badge" id="sp-covered-badge">&nbsp;</span>
               </div>
             </div>
 

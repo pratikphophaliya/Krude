@@ -23,6 +23,7 @@ import os
 import json
 import time
 import re
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -39,16 +40,18 @@ except ImportError:
 try:
     from engine.risk_pipeline import RiskPipeline
     from engine.database import db
-    from engine.scoring import score_headline
+    from engine.scoring import score_headline, ENGINE_KEYWORD
 except ImportError:
     try:
         from backend.engine.risk_pipeline import RiskPipeline
         from backend.engine.database import db
-        from backend.engine.scoring import score_headline
+        from backend.engine.scoring import score_headline, ENGINE_KEYWORD
     except ImportError:
         from risk_pipeline import RiskPipeline
         from database import db
-        from scoring import score_headline
+        from scoring import score_headline, ENGINE_KEYWORD
+
+logger = logging.getLogger("krude.risk_intel")
 
 CORRIDORS = ["Hormuz", "Bab-el-Mandeb", "Malacca", "Cape of Good Hope", "Suez"]
 
@@ -119,6 +122,9 @@ GNEWS_QUERY = '(Hormuz OR "Red Sea" OR Houthi OR Suez OR Malacca OR "Cape of Goo
 GDELT_QUERY = ('("Strait of Hormuz" OR "Persian Gulf" OR "Red Sea" OR Houthi OR "Suez Canal" '
                'OR "Strait of Malacca" OR "Cape of Good Hope") (tanker OR crude OR oil OR shipping) sourcelang:english')
 GDELT_URL = os.getenv("GDELT_DOC_API_URL", "https://api.gdeltproject.org/api/v2/doc/doc")
+IST = timezone(timedelta(hours=5, minutes=30))
+HISTORY_DAYS = 60   # scored headlines kept for the probability pipeline
+BACKFILL_DAYS = 42  # one-time GDELT backfill so time decay and 7-day momentum work from day one
 
 
 def _describe_error(e: Exception) -> str:
@@ -143,6 +149,9 @@ class RiskIntelligenceAgent:
         self.is_refreshing = False
         self.refresh_lock = threading.Lock()
         self.cache_data: Dict[str, Any] = self._load_cache()
+        self.history_file = data_dir / "live_headline_history.json"
+        self.history: Dict[str, Any] = self._load_history()
+        self.pipeline = self._build_pipeline()
         if time.time() - self.last_fetch_time > NEWS_REFRESH_SECONDS:
             self._trigger_background_refresh()
 
@@ -163,6 +172,89 @@ class RiskIntelligenceAgent:
         except Exception:
             pass
 
+    def _load_history(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.history_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"backfilled": False, "items": {}}
+
+    def _save_history(self):
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
+        self.history["items"] = {k: v for k, v in self.history["items"].items() if v["date"] >= cutoff}
+        try:
+            self.history_file.write_text(json.dumps(self.history, indent=1), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _build_pipeline(self) -> RiskPipeline:
+        """Probability pipeline over the stored live headlines (never the training CSV)."""
+        return RiskPipeline(headlines=[{
+            "date": h["date"],
+            "corridor": h["corridor"],
+            "title": h["title"],
+            "source": h["source"],
+            "raw_score": h["risk_score"],
+            "event_cluster": key,
+        } for key, h in self.history["items"].items()])
+
+    @staticmethod
+    def _title_key(title: str) -> str:
+        return re.sub(r"\W+", " ", title.lower()).strip()
+
+    def _score_and_record(self, item: Dict[str, Any], fetched_at: str) -> Optional[Dict[str, Any]]:
+        """
+        Assigns a corridor, scores the headline (reusing a stored score unless it came from the
+        keyword fallback) and records it in the history. Returns None for off-topic articles.
+        """
+        title = (item.get("title") or "").strip()
+        if len(title) < 15 or title == "[Removed]":
+            return None
+        corridor = self._match_corridor(f"{title} {item.get('description') or ''}")
+        if not corridor:
+            return None
+
+        key = self._title_key(title)
+        known = self.history["items"].get(key)
+        if known and known.get("model_used") != ENGINE_KEYWORD:
+            ev = {k: v for k, v in known.items() if k != "date"}
+        else:
+            ev = self._run_model_inference(title, corridor, item.get("source") or item["provider"])
+            ev.update({
+                "provider": item["provider"],
+                "url": item.get("url") or "",
+                "published_at": item.get("published_at") or "",
+            })
+        ev["fetched_at"] = fetched_at
+        self.history["items"][key] = dict(ev, date=(ev["published_at"] or fetched_at)[:10])
+        return ev
+
+    def _backfill_history(self):
+        """
+        GDELT backfill of the last BACKFILL_DAYS, one 7-day window per refresh cycle. GDELT
+        rate-limits bursts (HTTP 429), so windows are spread out and completed ones remembered.
+        """
+        windows = BACKFILL_DAYS // 7
+        done = set(self.history.setdefault("backfilled_weeks", []))
+        pending = [w for w in range(windows) if w not in done]
+        if not pending:
+            self.history["backfilled"] = True
+            return
+        week = pending[0]
+        w_end = datetime.now(timezone.utc) - timedelta(days=7 * week)
+        time.sleep(10)  # keep clear of the live GDELT request made just before
+        try:
+            items = self._fetch_gdelt(start=w_end - timedelta(days=7), end=w_end, max_records=40)
+        except Exception as e:
+            logger.warning("GDELT backfill window ending %s failed: %s (retrying next cycle)", w_end.date(), _describe_error(e))
+            return
+        fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for item in items:
+            self._score_and_record(dict(item, provider="GDELT"), fetched_at)
+        self.history["backfilled_weeks"] = sorted(done | {week})
+        self.history["backfilled"] = len(self.history["backfilled_weeks"]) == windows
+        self._save_history()
+        self.pipeline = self._build_pipeline()
+
     def _trigger_background_refresh(self):
         """Spawns a background thread to refresh all news providers without blocking user requests."""
         with self.refresh_lock:
@@ -173,6 +265,8 @@ class RiskIntelligenceAgent:
         def _worker():
             try:
                 self._perform_live_network_refresh()
+                if not self.history.get("backfilled"):
+                    self._backfill_history()
             finally:
                 with self.refresh_lock:
                     self.is_refreshing = False
@@ -214,10 +308,13 @@ class RiskIntelligenceAgent:
             "published_at": a.get("publishedAt"),
         } for a in resp.json().get("articles", [])]
 
-    def _fetch_gdelt(self) -> List[Dict[str, Any]]:
-        resp = requests.get(GDELT_URL, params={
-            "query": GDELT_QUERY, "mode": "artlist", "maxrecords": 30, "format": "json", "sort": "DateDesc"
-        }, headers={"User-Agent": "KrudeEnergySecurityAgent/2.0"}, timeout=15)
+    def _fetch_gdelt(self, start: Optional[datetime] = None, end: Optional[datetime] = None,
+                     max_records: int = 30) -> List[Dict[str, Any]]:
+        params = {"query": GDELT_QUERY, "mode": "artlist", "maxrecords": max_records, "format": "json", "sort": "DateDesc"}
+        if start and end:
+            params["startdatetime"] = start.strftime("%Y%m%d%H%M%S")
+            params["enddatetime"] = end.strftime("%Y%m%d%H%M%S")
+        resp = requests.get(GDELT_URL, params=params, headers={"User-Agent": "KrudeEnergySecurityAgent/2.0"}, timeout=15)
         resp.raise_for_status()
         articles = []
         for a in resp.json().get("articles", []):
@@ -259,25 +356,18 @@ class RiskIntelligenceAgent:
         seen_titles = set()
         articles: List[Dict[str, Any]] = []
         for item in sorted(raw, key=lambda a: a.get("published_at") or "", reverse=True):
-            title = (item.get("title") or "").strip()
-            title_key = re.sub(r"\W+", " ", title.lower()).strip()
-            if len(title) < 15 or title == "[Removed]" or title_key in seen_titles:
+            title_key = self._title_key(item.get("title") or "")
+            if title_key in seen_titles:
                 continue
-            corridor = self._match_corridor(f"{title} {item.get('description') or ''}")
-            if not corridor:
+            ev = self._score_and_record(item, fetched_at)
+            if ev is None:
                 continue
             seen_titles.add(title_key)
-
-            ev = self._run_model_inference(title, corridor, item.get("source") or item["provider"])
-            ev.update({
-                "provider": item["provider"],
-                "url": item.get("url") or "",
-                "published_at": item.get("published_at") or "",
-                "fetched_at": fetched_at,
-            })
             articles.append(ev)
             if len(articles) >= MAX_ARTICLES:
                 break
+        self._save_history()
+        self.pipeline = self._build_pipeline()
 
         # If every provider failed, keep serving the last real headlines (they carry their fetched_at)
         self.cache_data = {
@@ -307,6 +397,9 @@ class RiskIntelligenceAgent:
             "last_updated": datetime.fromtimestamp(last_updated, timezone.utc).isoformat(timespec="seconds") if last_updated else None,
             "providers": self.cache_data.get("providers", {}),
             "article_count": len(self.cache_data.get("articles", [])),
+            "history_headlines": len(self.history["items"]),
+            "backfill_weeks_done": len(self.history.get("backfilled_weeks", [])),
+            "backfill_weeks_total": BACKFILL_DAYS // 7,
         }
 
     def get_live_ticker_headlines(self) -> List[Dict[str, Any]]:
@@ -442,83 +535,54 @@ class RiskIntelligenceAgent:
 
     def calculate_supplier_probabilities(self, corridor_scores: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         """
-        Genuinely produces a live supply-disruption probability score by corridor and supplier
-        from live News, real Searoute Shipping graphs, and OFAC Sanctions compliance data.
-        
-        Data Fusion Architecture:
-        1. News Intelligence: Live GDELT headlines + fine-tuned Llama 3.2 3B scoring -> corridor P(disruption/30d) + momentum.
-        2. Shipping Logistics: DuckDB Searoute distances, tanker transit times, and Cape bypass voyage penalties.
-        3. Sanctions Scrutiny: OFAC SDN entity matching + shadow-fleet enforcement friction multiplier.
-        4. Physical Infrastructure: Pipeline bypass capacities (Petroline, Habshan-Fujairah, Kirkuk-Ceyhan, SUMED).
+        30-day supply-disruption probability by corridor and by supplier.
+
+        1. News: stored live headlines (NewsAPI, GNews, GDELT incl. 42-day backfill), each scored
+           0-10, run through RiskPipeline -> corridor P(disruption/30d) and 7-day momentum.
+        2. Sanctions: OFAC records per supplier country -> friction multiplier.
+        3. Infrastructure: pipeline bypass capacity (Petroline, Habshan-Fujairah, Kirkuk-Ceyhan, SUMED)
+           reduces how much of a corridor's risk reaches each supplier.
         """
-        today_str = datetime.utcnow().strftime("%Y-%m-%d")
-        
-        # 1. LIVE NEWS INTEL & CORRIDOR MOMENTUM
+        now_utc = datetime.now(timezone.utc)
+        today_str = now_utc.strftime("%Y-%m-%d")
+        week_ago_str = (now_utc - timedelta(days=7)).strftime("%Y-%m-%d")
+        pipeline = self.pipeline
+
+        # 1. CORRIDOR PROBABILITY from stored live headlines (dedupe -> decay -> aggregate -> momentum -> sanctions)
         corridors_summary = []
         corridor_p_map = {}
-        
-        # Predefined corridor defaults (with real historical pipeline baselines)
-        corridor_meta = {
-            "Hormuz": {"flow_kbd": 2598.3, "desc": "Arterial Inflow 2,598 kbd", "default_p": 0.1716, "default_mom": "+0.02"},
-            "Bab-el-Mandeb": {"flow_kbd": 2355.0, "desc": "Red Sea Corridor 2,355 kbd", "default_p": 0.0800, "default_mom": "-0.01"},
-            "Suez": {"flow_kbd": 900.0, "desc": "Northbound Canal 900 kbd", "default_p": 0.0300, "default_mom": "+0.00"},
-            "Malacca": {"flow_kbd": 800.0, "desc": "Eastbound Conduit 800 kbd", "default_p": 0.0050, "default_mom": "+0.00"},
-            "Cape of Good Hope": {"flow_kbd": 650.0, "desc": "Open Ocean Long-Haul 650 kbd", "default_p": None, "default_mom": "+0.00"}
+        corridor_flow_desc = {
+            "Hormuz": "Arterial Inflow 2,598 kbd",
+            "Bab-el-Mandeb": "Red Sea Corridor 2,355 kbd",
+            "Suez": "Northbound Canal 900 kbd",
+            "Malacca": "Eastbound Conduit 800 kbd",
+            "Cape of Good Hope": "Open Ocean Long-Haul 650 kbd",
         }
 
         for corridor_name in CORRIDORS:
-            meta = corridor_meta.get(corridor_name, {})
-            
-            if corridor_name == "Cape of Good Hope":
-                # Real shipping calculation: Open ocean cannot close; represents transit lag delay
-                cape_delay_days = 0.9  # Baseline Red Sea avoidance voyage delay
-                corridors_summary.append({
-                    "corridor": corridor_name,
-                    "p_disruption_30d": None,
-                    "p_display": "—",
-                    "is_cape": True,
-                    "momentum": "+0.00 momentum",
-                    "delay_days": cape_delay_days,
-                    "delay_note": "cannot close, +0.9d delay",
-                    "trend": "delay",
-                    "inflow_desc": meta.get("desc", "")
-                })
-                corridor_p_map[corridor_name] = 0.0
-                continue
+            res_today = pipeline.compute_corridor_probability(corridor_name, today_str)
+            res_past = pipeline.compute_corridor_probability(corridor_name, week_ago_str)
+            p_val = res_today["p_disruption_30d"]
+            diff_pp = (p_val - res_past["p_disruption_30d"]) * 100.0
 
-            # Query live pipeline / GDELT headlines
-            p_val = meta.get("default_p", 0.05)
-            mom_str = meta.get("default_mom", "+0.00")
-            
-            try:
-                # Dynamically compute from live pipeline if available
-                res_today = self.pipeline.compute_corridor_probability(corridor_name, today_str)
-                p_val = round(res_today.get("p_disruption_30d", meta.get("default_p", 0.05)), 4)
-                
-                # Check 7-day momentum
-                d_past = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
-                res_past = self.pipeline.compute_corridor_probability(corridor_name, d_past)
-                p_past = res_past.get("p_disruption_30d", p_val)
-                diff = p_val - p_past
-                mom_str = f"{diff:+.2f} momentum"
-            except Exception:
-                pass
-
-            # Override with custom user sliders if provided
+            # Analyst override (0-10 score) mapped through the same calibration as the pipeline
             if corridor_scores and corridor_name in corridor_scores:
-                score = corridor_scores[corridor_name]
-                p_val = round((score / 10.0) * 0.24, 4)
+                p_val, _ = pipeline.calculate_calibrated_30d_probabilities(corridor_scores[corridor_name] / 10.0)
 
             corridor_p_map[corridor_name] = p_val
-            trend = "up" if "+" in mom_str and mom_str != "+0.00" else ("down" if "-" in mom_str else "stable")
-            
+            top = max(res_today["active_events"], key=lambda e: e["decayed_weight"], default=None)
             corridors_summary.append({
                 "corridor": corridor_name,
                 "p_disruption_30d": p_val,
                 "p_display": f"{p_val * 100:.1f}%",
-                "momentum": mom_str,
-                "trend": trend,
-                "inflow_desc": meta.get("desc", "")
+                "p_closure_30d": res_today["p_closure_30d"],
+                "momentum_pp": round(diff_pp, 2),
+                "momentum": f"{diff_pp:+.1f} pp vs 7d ago",
+                "trend": "up" if diff_pp > 0.05 else ("down" if diff_pp < -0.05 else "stable"),
+                "active_events_count": res_today["active_events_count"],
+                "top_event": top["title"] if top else None,
+                "is_cape": corridor_name == "Cape of Good Hope",
+                "inflow_desc": corridor_flow_desc[corridor_name],
             })
 
         # 2. RAW SUPPLIER MASTER DEFINITIONS (India Sovereign Import Basket: 18 Countries)
@@ -619,7 +683,7 @@ class RiskIntelligenceAgent:
                 "region": sup["region"],
                 "p_supply_disruption": p_sup,
                 "p_display": f"{p_sup * 100:.1f}%",
-                "bar_pct": min(100, int(p_sup * 100 * 4.5)),
+                "bar_pct": min(100, int(p_sup * 100 * 9)),  # full bar ~ 11%, the calibration maximum
                 "baseline_flow_kbd": flow_kbd,
                 "at_risk_kbd": at_risk,
                 "bypass_capacity_mbpd": sup["bypass_mbpd"],
@@ -633,12 +697,12 @@ class RiskIntelligenceAgent:
 
         return {
             "horizon": "30-day horizon",
-            "timestamp": time.strftime("%H:%M IST"),
+            "timestamp": datetime.now(IST).strftime("%H:%M IST"),
+            "headlines_in_window": len(pipeline.headlines),
             "data_sources_active": [
-                "GDELT DOC 2.0 (Live News)",
-                "DuckDB Searoute Distance & Transit Graph (Shipping)",
-                "OFAC SDN Sanctions Database (Compliance)",
-                "Physical Pipeline Infrastructure Registry (Bypass)"
+                "Live news: NewsAPI, GNews, GDELT (stored history, 45-day decay window)",
+                "OFAC sanctions records (local snapshot)",
+                "Pipeline bypass capacities (static registry)",
             ],
             "corridors": corridors_summary,
             "suppliers": suppliers_result,

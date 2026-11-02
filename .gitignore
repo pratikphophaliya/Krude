@@ -44,6 +44,7 @@ backend/data/*.duckdb.wal
 backend/data/*.db
 backend/data/*.sqlite
 backend/data/gdelt_cache.json
+backend/data/live_headline_history.json
 
 # Generated Plots & Visual Benchmarks
 *.png

@@ -186,6 +186,38 @@ class TestKrudeDigitalTwin(unittest.TestCase):
         self.assertGreaterEqual(res["risk_score"], 0.0)
         self.assertLessEqual(res["risk_score"], 10.0)
 
+    def test_supply_probability_comes_from_live_history(self):
+        """Corridor/supplier probabilities are computed from stored live headlines, within calibration bounds."""
+        import json
+        import tempfile
+        import time
+        from datetime import datetime, timezone
+        from engine.risk_intel import RiskIntelligenceAgent, CACHE_SCHEMA
+
+        def agent_with(items):
+            tmp = Path(tempfile.mkdtemp())
+            # Fresh cache + finished backfill, so the agent makes no network calls
+            (tmp / "gdelt_cache.json").write_text(json.dumps(
+                {"schema": CACHE_SCHEMA, "last_updated": time.time(), "last_attempt": time.time(),
+                 "providers": {}, "articles": []}))
+            (tmp / "live_headline_history.json").write_text(json.dumps({"backfilled": True, "items": items}))
+            return RiskIntelligenceAgent(tmp)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        severe = {"date": today, "corridor": "Hormuz", "title": "Tankers hit mines in Strait of Hormuz",
+                  "source": "Test Wire", "risk_score": 9.0, "model_used": "test"}
+        res = agent_with({"tankers hit mines": severe}).calculate_supplier_probabilities()
+        p = {c["corridor"]: c["p_disruption_30d"] for c in res["corridors"]}
+        sup = {s["supplier"]: s["p_supply_disruption"] for s in res["suppliers"]}
+
+        self.assertGreater(p["Hormuz"], p["Malacca"])
+        self.assertTrue(all(v <= 0.111 for v in p.values()), "must stay within the pipeline calibration")
+        self.assertGreater(sup["Kuwait"], sup["Saudi Arabia"], "no-bypass supplier is more exposed")
+        self.assertEqual(sup["UAE"], 0.0, "Habshan-Fujairah fully bypasses Hormuz")
+
+        quiet = agent_with({}).calculate_supplier_probabilities()
+        self.assertTrue(all(c["p_disruption_30d"] < 0.01 for c in quiet["corridors"]), "no news -> quiet floor")
+
     def test_keyword_fallback_is_labelled_when_ollama_down(self):
         """With Ollama unreachable, scores come from the keyword engine and say so."""
         import os

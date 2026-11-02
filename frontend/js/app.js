@@ -54,27 +54,47 @@ function initSupplyDisruptionStrip() {
   updateLiveClock();
   setInterval(updateLiveClock, 1000);
 
-  // 2. Comprehensive 18-country supplier dataset (with real India crude import baselines)
-  let allSuppliers = [
-    { supplier: "Kuwait", region: "Middle East", p_supply_disruption: 0.1716, p_display: "17.2%", bar_pct: 77, baseline_flow_kbd: 210, at_risk_kbd: 36, best_route: "100% Hormuz (No bypass)", colorClass: "text-red", barClass: "bg-red" },
-    { supplier: "Saudi Arabia", region: "Middle East", p_supply_disruption: 0.0556, p_display: "5.6%", bar_pct: 25, baseline_flow_kbd: 625, at_risk_kbd: 35, best_route: "Yanbu Petroline bypass (5.0 MBPD)", colorClass: "text-amber", barClass: "bg-amber" },
-    { supplier: "Iraq", region: "Middle East", p_supply_disruption: 0.0550, p_display: "5.5%", bar_pct: 25, baseline_flow_kbd: 890, at_risk_kbd: 49, best_route: "Kirkuk-Ceyhan pipeline option", colorClass: "text-amber", barClass: "bg-amber" },
-    { supplier: "Qatar", region: "Middle East", p_supply_disruption: 0.1716, p_display: "17.2%", bar_pct: 77, baseline_flow_kbd: 85, at_risk_kbd: 15, best_route: "100% Hormuz (Ras Laffan)", colorClass: "text-red", barClass: "bg-red" },
-    { supplier: "UAE", region: "Middle East", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 420, at_risk_kbd: 0, best_route: "Habshan-Fujairah bypass (100%)", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Oman", region: "Middle East", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 110, at_risk_kbd: 0, best_route: "Mina Al Fahal / Duqm (Arabian Sea)", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Russia", region: "Eurasia", p_supply_disruption: 0.0080, p_display: "0.8%", bar_pct: 4, baseline_flow_kbd: 1750, at_risk_kbd: 14, best_route: "Cape / Kozmino Pacific route", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "USA", region: "Americas", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 250, at_risk_kbd: 0, best_route: "Atlantic / Cape open ocean", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Nigeria", region: "Africa", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 180, at_risk_kbd: 0, best_route: "Gulf of Guinea / Cape route", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Angola", region: "Africa", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 140, at_risk_kbd: 0, best_route: "South Atlantic / Cape route", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Brazil", region: "Americas", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 120, at_risk_kbd: 0, best_route: "Santos Basin / Cape route", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Mexico", region: "Americas", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 95, at_risk_kbd: 0, best_route: "Gulf of Mexico / Cape route", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Colombia", region: "Americas", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 70, at_risk_kbd: 0, best_route: "Covenas / Cape route", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Norway", region: "Eurasia", p_supply_disruption: 0.0150, p_display: "1.5%", bar_pct: 7, baseline_flow_kbd: 65, at_risk_kbd: 1, best_route: "North Sea / Cape route", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Egypt", region: "Africa", p_supply_disruption: 0.0300, p_display: "3.0%", bar_pct: 14, baseline_flow_kbd: 50, at_risk_kbd: 2, best_route: "SUMED Pipeline / Red Sea", colorClass: "text-amber", barClass: "bg-amber" },
-    { supplier: "Guyana", region: "Americas", p_supply_disruption: 0.0000, p_display: "0.0%", bar_pct: 2, baseline_flow_kbd: 45, at_risk_kbd: 0, best_route: "Liza FPSO / Cape route", colorClass: "text-green", barClass: "bg-green" },
-    { supplier: "Algeria", region: "Africa", p_supply_disruption: 0.0300, p_display: "3.0%", bar_pct: 14, baseline_flow_kbd: 40, at_risk_kbd: 1, best_route: "Mediterranean / Suez Canal", colorClass: "text-amber", barClass: "bg-amber" },
-    { supplier: "Malaysia", region: "Asia / Pacific", p_supply_disruption: 0.0050, p_display: "0.5%", bar_pct: 3, baseline_flow_kbd: 35, at_risk_kbd: 0, best_route: "Malacca Strait", colorClass: "text-green", barClass: "bg-green" }
-  ];
+  // 2. Filled from /api/risk/supply-disruption-probabilities (no hardcoded fallback values)
+  let allSuppliers = [];
+  let probabilitiesLoaded = false;
+  const corridorList = document.getElementById("sp-corridors-list");
+  const coveredBadge = document.getElementById("sp-covered-badge");
+
+  function probColor(p) {
+    // Calibrated 30-day probabilities top out near 11%
+    return p >= 0.07 ? "red" : (p >= 0.04 ? "amber" : "green");
+  }
+
+  function renderCorridors(corridors) {
+    if (!corridorList) return;
+    corridorList.innerHTML = "";
+    corridors.forEach(c => {
+      const item = document.createElement("div");
+      item.className = "sp-corridor-item";
+      if (c.top_event) item.title = `Strongest recent event: ${c.top_event}`;
+
+      const name = document.createElement("div");
+      name.className = "sp-c-name";
+      name.textContent = c.corridor;
+
+      const val = document.createElement("div");
+      val.className = `sp-c-val text-${probColor(c.p_disruption_30d)}`;
+      val.textContent = `${c.p_display} `;
+      const mom = document.createElement("span");
+      const momColor = c.trend === "up" ? "text-red" : (c.trend === "down" ? "text-green" : "text-dim");
+      mom.className = `sp-momentum ${momColor}`;
+      const arrow = c.trend === "up" ? "↗ " : (c.trend === "down" ? "↘ " : "");
+      mom.textContent = `${arrow}${c.momentum}`;
+      val.appendChild(mom);
+
+      const sub = document.createElement("div");
+      sub.className = "sp-c-sub";
+      sub.textContent = `${c.inflow_desc} · ${c.active_events_count} live event${c.active_events_count === 1 ? "" : "s"} in window`;
+
+      item.append(name, val, sub);
+      corridorList.appendChild(item);
+    });
+  }
 
   let currentRegion = "all";
   let currentSearch = "";
@@ -88,13 +108,14 @@ function initSupplyDisruptionStrip() {
     });
 
     if (filtered.length === 0) {
-      tableContainer.innerHTML = `<div style="padding: 24px; text-align: center; color: var(--text-dim); font-size: 0.85rem;">No suppliers match your search query.</div>`;
+      const msg = probabilitiesLoaded ? "No suppliers match your search query." : "Loading live probabilities…";
+      tableContainer.innerHTML = `<div style="padding: 24px; text-align: center; color: var(--text-dim); font-size: 0.85rem;">${msg}</div>`;
       return;
     }
 
     tableContainer.innerHTML = filtered.map(s => {
-      const pColor = s.p_supply_disruption >= 0.10 ? "text-red" : (s.p_supply_disruption >= 0.03 ? "text-amber" : "text-green");
-      const bColor = s.p_supply_disruption >= 0.10 ? "bg-red" : (s.p_supply_disruption >= 0.03 ? "bg-amber" : "bg-green");
+      const pColor = `text-${probColor(s.p_supply_disruption)}`;
+      const bColor = `bg-${probColor(s.p_supply_disruption)}`;
       const riskColor = s.at_risk_kbd > 0 ? (s.at_risk_kbd > 20 ? "text-red" : "text-amber") : "text-green";
       const hasOfac = s.sanctions_friction_multiplier > 1.0 || s.ofac_records_count > 0;
       
@@ -149,11 +170,13 @@ function initSupplyDisruptionStrip() {
         .then(res => res.ok ? res.json() : null)
         .then(data => {
           if (!data || !data.suppliers) return;
-          allSuppliers = data.suppliers.map(s => ({
-            ...s,
-            bar_pct: s.bar_pct || Math.min(100, Math.round(s.p_supply_disruption * 100 * 4.5))
-          }));
+          probabilitiesLoaded = true;
+          allSuppliers = data.suppliers;
           renderSuppliers();
+          renderCorridors(data.corridors || []);
+          if (coveredBadge) {
+            coveredBadge.textContent = `${data.suppliers.length} Nations · ${Math.round(data.total_import_covered_kbd).toLocaleString()} kbd`;
+          }
         })
         .catch(() => {});
     }
@@ -730,7 +753,9 @@ async function initHeadlineTicker() {
       const mins = Math.round((Date.now() - new Date(status.last_updated).getTime()) / 60000);
       updated = mins < 1 ? "updated just now" : `updated ${mins} min ago`;
     }
-    el.textContent = [updated, ...providers].join(" · ");
+    const backfill = status.backfill_weeks_done < status.backfill_weeks_total
+      ? [`history backfill ${status.backfill_weeks_done}/${status.backfill_weeks_total} weeks`] : [];
+    el.textContent = [updated, ...providers, ...backfill].join(" · ");
   }
 
   async function fetchFeedStatus() {

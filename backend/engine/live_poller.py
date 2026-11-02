@@ -11,14 +11,13 @@ Krude - Block 5: Live Poller Loop & SSE Stream Manager
 
 import asyncio
 import json
-import time
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, Any, Optional, Set
 
-from .risk_pipeline import RiskPipeline
 from .database import db
+from .risk_intel import CORRIDORS
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -43,7 +42,7 @@ class LivePollerManager:
     """
     def __init__(self, data_dir: Path = DATA_DIR):
         self.data_dir = data_dir
-        self.pipeline = RiskPipeline()
+        self.risk_agent = None
         self.db = db
         
         # SSE Subscriber Queues
@@ -113,19 +112,17 @@ class LivePollerManager:
 
         while self.poller_active:
             try:
-                now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-                latest_d_str = datetime.utcnow().strftime("%Y-%m-%d")
-                
-                corridors_status = []
-                for c in ["Hormuz", "Bab-el-Mandeb", "Malacca", "Cape of Good Hope", "Suez"]:
-                    c_prob = self.pipeline.compute_corridor_probability(c, latest_d_str)
-                    corridors_status.append(c_prob)
+                now = datetime.now(timezone.utc)
+                today_str = now.strftime("%Y-%m-%d")
+
+                # Same live-history pipeline that backs /api/risk/supply-disruption-probabilities
+                pipeline = risk_agent.pipeline
+                corridors_status = [pipeline.compute_corridor_probability(c, today_str) for c in CORRIDORS]
 
                 headlines = risk_agent.get_live_ticker_headlines()
 
                 payload = {
-                    "poll_timestamp": now_str,
-                    "brent_spot_usd": 82.50,
+                    "poll_timestamp": now.strftime("%Y-%m-%d %H:%M:%S UTC"),
                     "corridors": corridors_status,
                     "headlines": headlines,
                     "feed_status": risk_agent.get_feed_status(),

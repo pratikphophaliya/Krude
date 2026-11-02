@@ -343,7 +343,8 @@ class RiskPipeline:
     """
 
     def __init__(self, headlines: Optional[List[Dict[str, Any]]] = None):
-        self.headlines = headlines or self._load_headlines_from_csv()
+        # Explicit list (live history) is used as-is, even if empty; None means the curated historical CSV
+        self.headlines = headlines if headlines is not None else self._load_headlines_from_csv()
         self.half_life_days = 7.0   # Decay half-life (t_1/2 = 7 days)
         self.decay_lambda = math.log(2.0) / self.half_life_days
         self.momentum_weight = 0.40 # Acceleration factor for rising crisis
